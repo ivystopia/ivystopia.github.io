@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Ensure the script runs with sudo privileges
+sudo true
+
+# Function to print a separator line
+separator() {
+    echo
+    printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -
+}
+
+# Function to run a command and print a separator afterwards
+run_cmd() {
+    echo "Running: $1"
+    eval "$1"
+    separator
+}
+
+# Function to upgrade packages from APT
+upgrade_apt_packages() {
+    echo "Upgrading APT packages..."
+    run_cmd "sudo apt-get update"
+    run_cmd "sudo apt-get upgrade -y"
+    run_cmd "sudo apt-get dist-upgrade -y"
+    run_cmd "sudo apt-get autoremove -y"
+    run_cmd "sudo apt-get check"
+    run_cmd "sudo deborphan | xargs sudo apt-get -y remove --purge"
+    run_cmd "sudo apt-get install --fix-missing -y"
+}
+
+# Function to remove old kernels
+remove_old_kernels() {
+    echo "Removing old kernels..."
+    local kernels_to_remove
+    kernels_to_remove=$(dpkg --list | grep -P -o 'linux-(headers|image|modules)-\d+\.\d+\.\d+-\d+' | grep -v "$(uname -r | cut -d- -f1,2)")
+    if [ -n "$kernels_to_remove" ]; then
+        sudo apt-get purge -y $kernels_to_remove
+    else
+        echo "No old kernels to remove."
+    fi
+    separator
+}
+
+# Function to clean up APT caches
+clean_apt_cache() {
+    echo "Cleaning APT caches..."
+    run_cmd "sudo apt-get autoclean"
+    run_cmd "sudo apt-get clean"
+}
+
+# Function to upgrade pip packages
+upgrade_pip_packages() {
+    echo "Upgrading pip packages..."
+    local pip_outdated
+    pip_outdated=$(pip --disable-pip-version-check list --outdated --format=json | python -c "import json, sys; packages=[pkg['name'] for pkg in json.load(sys.stdin)]; print('\n'.join(packages))")
+
+    if [ -n "$pip_outdated" ]; then
+        echo "Upgrading the following pip packages:"
+        echo "$pip_outdated"
+        echo "$pip_outdated" | xargs -n1 pip install -U
+    else
+        echo "All pip packages are up-to-date."
+    fi
+    separator
+}
+
+# Function to update oh-my-zsh
+upgrade_oh_my_zsh() {
+    pushd $HOME/.oh-my-zsh
+    git pull
+    popd
+}
+
+# Main script execution
+upgrade_apt_packages
+remove_old_kernels
+clean_apt_cache
+upgrade_pip_packages
+upgrade_oh_my_zsh

@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# flushdns
+#
+# Purpose:
+# This script checks the resolution status of specified domain names by querying
+# various DNS root servers. It fetches the list of root server IP addresses
+# and then performs DNS queries for each domain across these root servers.
+#
+# The results are displayed in a summary table, indicating whether each domain was
+# successfully resolved by each root server. This helps in validating DNS configurations,
+# diagnosing resolution issues, and monitoring the health of DNS infrastructure.
+
+# Fetch root servers dynamically from the Internic website
+ROOT_SERVERS=$(curl -s "https://www.internic.net/domain/named.root" | grep -E '^[A-M]\.ROOT-SERVERS\.NET\.' -A 1 | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+
+# Check if at least one domain is provided
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 <domain1> [domain2 ... domainN]"
+    exit 1
+fi
+
+# Initialize an array to store results
+declare -a results
+
+# Loop through each domain provided as an argument
+for DOMAIN in "$@"; do
+    echo "Processing domain: $DOMAIN"
+    # Loop through each dynamically fetched root server
+    for ROOT_SERVER_IP in $ROOT_SERVERS; do
+        echo "Querying root server $ROOT_SERVER_IP for domain $DOMAIN"
+        # Suppress the dig output and check the return status
+        if dig -4 +trace @"$ROOT_SERVER_IP" "$DOMAIN" >/dev/null 2>&1; then
+            echo "Success: $ROOT_SERVER_IP"
+            results+=("$DOMAIN|$ROOT_SERVER_IP|Success")
+        else
+            echo "Failure: $ROOT_SERVER_IP"
+            results+=("$DOMAIN|$ROOT_SERVER_IP|Failure")
+        fi
+        echo "---------------------------------------------"
+    done
+done
+
+# Sort the results array by domain
+IFS=$'\n' sorted_results=($(sort <<<"${results[*]}"))
+unset IFS
+
+# Print the summary table
+echo -e "\nSummary Table:"
+echo "Domain           | Root Server       | Status"
+echo "---------------------------------------------------"
+
+for result in "${sorted_results[@]}"; do
+    IFS='|' read -r DOMAIN ROOT_SERVER_IP STATUS <<<"$result"
+    printf "%-15s | %-15s | %s\n" "$DOMAIN" "$ROOT_SERVER_IP" "$STATUS"
+done
