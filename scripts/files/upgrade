@@ -1,0 +1,198 @@
+#!/bin/bash
+
+# This script automates system maintenance tasks on Ubuntu:
+#   1. Upgrades system packages via APT
+#   2. Removes orphaned and old kernels
+#   3. Upgrades pip and pip packages
+#   4. Updates Oh My Zsh (if installed)
+#   5. Cleans the thumbnail cache, journal logs, and old log files
+#
+# A log of this script's execution is saved in /tmp/ with a timestamped filename.
+# Log files older than 7 days will be automatically cleaned up by the script.
+
+set -euo pipefail
+
+# Define colors for output
+GREEN="\033[1;32m"
+RED="\033[1;31m"
+BLUE="\033[1;34m"
+RESET="\033[0m"
+
+# Create a log file in /tmp/ with the current datestamp
+LOG_FILE="/tmp/log-upgrade-$(date +%Y%m%d%H%M%S).log"
+
+# Redirect stdout and stderr to the log file and the console
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Ensure the script is run as a non-root user
+if [[ $EUID -eq 0 ]]; then
+    printf "${RED}Please run this script as a non-root user.${RESET}\n"
+    exit 1
+fi
+
+# Function to print a message in the specified color
+print_in_color() {
+    local color="$1"
+    local message="$2"
+    printf "%b%s%b\n" "$color" "$message" "$RESET"
+}
+
+# Function to print a separator line for clarity in log output
+separator() {
+    local cols
+    cols=$(tput cols || echo 80)
+    printf '\n'
+    printf '%*s\n' "$cols" '' | tr ' ' '-'
+}
+
+# Function to handle errors and exit the script gracefully
+error_exit() {
+    print_in_color "$RED" "Error: $1" >&2
+    printf "Check the log file at %s for more details.\n" "$LOG_FILE" >&2
+    exit 1
+}
+
+# Function to run a command and print a separator afterwards
+run_cmd() {
+    local cmd="$1"
+    print_in_color "$BLUE" "Running: $cmd"
+    if ! eval "$cmd"; then
+        error_exit "Command failed: $cmd"
+    fi
+    separator
+}
+
+# Function to ensure a command is available, exits if not found
+ensure_command() {
+    local cmd="$1"
+    if ! command -v "$cmd" &>/dev/null; then
+        error_exit "Required command '$cmd' is not installed. Please install it and rerun the script."
+    fi
+}
+
+# Function to verify all required commands are available
+verify_dependencies() {
+    print_in_color "$GREEN" "Verifying required commands..."
+
+    # List of required commands
+    local commands=("deborphan" "purge-old-kernels" "pip3" "python3" "git")
+    for cmd in "${commands[@]}"; do
+        ensure_command "$cmd"
+    done
+
+    print_in_color "$GREEN" "All required commands are available."
+    separator
+}
+
+# Function to upgrade system packages using APT
+upgrade_apt_packages() {
+    print_in_color "$GREEN" "Upgrading APT packages..."
+    run_cmd "sudo apt-get update"
+    run_cmd "sudo apt-get install --fix-broken -y"
+    run_cmd "sudo apt-get full-upgrade -y"
+    run_cmd "sudo apt-get autoremove -y"
+    run_cmd "sudo apt-get autoclean"
+    run_cmd "sudo apt-get clean"
+}
+
+# Function to remove orphaned packages
+remove_orphaned_packages() {
+    print_in_color "$GREEN" "Removing orphaned packages..."
+    local orphans
+    orphans=$(deborphan)
+
+    if [[ -n "$orphans" ]]; then
+        print_in_color "$BLUE" "Orphaned packages found:\n$orphans"
+        run_cmd "sudo apt-get purge -y $orphans"
+    else
+        print_in_color "$GREEN" "No orphaned packages to remove."
+        separator
+    fi
+}
+
+# Function to safely remove old kernels using purge-old-kernels
+remove_old_kernels() {
+    print_in_color "$GREEN" "Removing old kernels..."
+    run_cmd "sudo purge-old-kernels -y"
+}
+
+# Function to upgrade pip and its packages
+upgrade_pip_packages() {
+    print_in_color "$GREEN" "Upgrading pip packages..."
+    run_cmd "pip3 install --break-system-packages --upgrade pip --user"
+
+    local pip_outdated
+    pip_outdated=$(pip3 list --outdated --format=json | python3 -c "import json, sys; packages=[pkg['name'] for pkg in json.load(sys.stdin)]; print(' '.join(packages))")
+
+    if [[ -n "$pip_outdated" ]]; then
+        print_in_color "$BLUE" "Upgrading the following pip packages:\n$pip_outdated"
+        for pkg in $pip_outdated; do
+            run_cmd "pip3 install --break-system-packages --upgrade $pkg --user"
+        done
+    else
+        print_in_color "$GREEN" "All pip packages are up-to-date."
+        separator
+    fi
+}
+
+# Function to update Oh My Zsh if installed
+upgrade_oh_my_zsh() {
+    print_in_color "$GREEN" "Updating Oh My Zsh..."
+    local oh_my_zsh_dir="$HOME/.oh-my-zsh"
+
+    if [[ -d "$oh_my_zsh_dir" ]]; then
+        pushd "$oh_my_zsh_dir" >/dev/null
+        run_cmd "git pull"
+        popd >/dev/null
+    else
+        print_in_color "$GREEN" "Oh My Zsh is not installed."
+        separator
+    fi
+}
+
+# Function to clean the user's thumbnail cache
+clean_thumbnail_cache() {
+    print_in_color "$GREEN" "Cleaning thumbnail cache..."
+    run_cmd "rm -rf \"$HOME/.cache/thumbnails\"/*"
+}
+
+# Function to clean up systemd journal logs, limiting size to 100MB
+clean_journal_logs() {
+    print_in_color "$GREEN" "Cleaning journal logs..."
+    run_cmd "sudo journalctl --vacuum-size=100M"
+}
+
+# Function to clean up old log files older than 7 days in /tmp
+cleanup_old_logs() {
+    print_in_color "$GREEN" "Cleaning up old log files..."
+    run_cmd "sudo find /tmp/ -type f -name 'log-upgrade-*.log' -mtime +7 -exec rm {} \;"
+    print_in_color "$GREEN" "Old log files cleaned up."
+    separator
+}
+
+# List of steps to execute in order
+run_steps=(
+    "upgrade_apt_packages"
+    "remove_orphaned_packages"
+    "remove_old_kernels"
+    "upgrade_pip_packages"
+    "upgrade_oh_my_zsh"
+    "clean_thumbnail_cache"
+    "clean_journal_logs"
+)
+
+# Main script execution
+main() {
+    verify_dependencies
+
+    for step in "${run_steps[@]}"; do
+        "$step"
+    done
+
+    print_in_color "$GREEN" "System update and cleanup complete!"
+    printf "Log file located at: %s\n" "$LOG_FILE"
+    cleanup_old_logs
+}
+
+# Invoke the main function to start the script
+main

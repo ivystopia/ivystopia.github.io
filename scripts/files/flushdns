@@ -1,0 +1,101 @@
+#!/bin/bash
+
+# DNS Propagation Checker
+#
+# Purpose:
+# This script checks the resolution status of specified domain names by querying
+# various DNS resolvers. It first queries the nameservers specified in /etc/resolv.conf
+# and then proceeds to query a list of public DNS servers. It performs DNS queries
+# for each domain across these resolvers for all common DNS record types.
+# The script is configured to use IPv4 only.
+
+# Define all common DNS record types to query
+RECORD_TYPES=(
+    A
+    AAAA
+    CNAME
+    MX
+    NS
+    PTR
+    SOA
+    SRV
+    TXT
+    SPF
+    NAPTR
+    DS
+    DNSKEY
+    CERT
+    LOC
+    DNAME
+    HIP
+    IPSECKEY
+    KX
+    SSHFP
+    TLSA
+    URI
+    # Add more record types here if needed
+)
+
+# Extract nameservers from /etc/resolv.conf and add them to the list
+# Read nameservers from /etc/resolv.conf into an array
+mapfile -t RESOLV_CONF_NAMESERVERS < <(grep -E "^nameserver" /etc/resolv.conf | awk '{print $2}')
+
+# Define a list of DNS servers to query, starting with /etc/resolv.conf nameservers
+DNS_SERVERS=(
+    "${RESOLV_CONF_NAMESERVERS[@]}"
+    8.8.8.8        # Google Public DNS
+    1.1.1.1        # Cloudflare DNS
+    9.9.9.9        # Quad9 DNS
+    208.67.222.222 # OpenDNS
+    # Add more DNS servers here if needed
+)
+
+# Check if at least one domain is provided
+if [[ $# -eq 0 ]]; then
+    echo "Usage: $0 <domain1> [domain2 ... domainN]"
+    exit 1
+fi
+
+# Initialize an array to store results
+declare -a results
+
+# Loop through each domain provided as an argument
+for DOMAIN in "$@"; do
+    echo "Processing domain: $DOMAIN"
+    # Loop through each DNS server
+    for DNS_SERVER in "${DNS_SERVERS[@]}"; do
+        echo "Querying DNS server $DNS_SERVER for domain $DOMAIN"
+
+        # Loop through each DNS record type
+        for RECORD_TYPE in "${RECORD_TYPES[@]}"; do
+            echo "  Querying record type: $RECORD_TYPE"
+            # Perform the dig query using IPv4 only and capture the output
+            OUTPUT=$(dig -4 @"$DNS_SERVER" "$DOMAIN" "$RECORD_TYPE" +noall +answer)
+            if [[ -n "$OUTPUT" ]]; then
+                STATUS="Success"
+                echo "    $RECORD_TYPE Record: Success"
+                echo "$OUTPUT"
+            else
+                STATUS="Failure"
+                echo "    $RECORD_TYPE Record: Failure"
+            fi
+            # Store the results in the array
+            results+=("$DOMAIN|$DNS_SERVER|$RECORD_TYPE|$STATUS")
+        done
+        echo "---------------------------------------------"
+    done
+done
+
+# Sort the results array by domain, DNS server, and record type
+IFS=$'\n' sorted_results=($(sort <<<"${results[*]}"))
+unset IFS
+
+# Print the summary table
+echo -e "\nSummary Table:"
+printf "%-25s | %-15s | %-10s | %-7s\n" "Domain" "DNS Server" "Record Type" "Status"
+echo "--------------------------------------------------------------------------"
+
+for result in "${sorted_results[@]}"; do
+    IFS='|' read -r DOMAIN DNS_SERVER RECORD_TYPE STATUS <<<"$result"
+    printf "%-25s | %-15s | %-10s | %-7s\n" "$DOMAIN" "$DNS_SERVER" "$RECORD_TYPE" "$STATUS"
+done
