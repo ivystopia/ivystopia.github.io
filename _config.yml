@@ -1,0 +1,64 @@
+title: ''
+
+# Repository and Theme Configuration
+plugins:
+  - jekyll-seo-tag
+  - jekyll-github-metadata
+  - jekyll-remote-theme
+remote_theme: just-the-docs/just-the-docs
+permalink: pretty # Set pretty permalinks
+
+# Exclude specific directories and files from the build
+# exclude:
+
+# Features Configuration
+enable_copy_code_button: true
+search_enabled: false
+heading_anchors: true
+color_scheme: dark
+
+# Navigation Settings
+nav_enabled: false
+
+# Callouts Configuration
+callouts_level: quiet # Set callouts to be less prominent
+callouts:
+  highlight:
+    color: yellow
+  important:
+    title: Important
+    color: blue
+  new:
+    title: New
+    color: green
+  note:
+    title: Note
+    color: purple
+  warning:
+    title: Warning
+    color: red
+
+# Plugins and Markdown Configuration
+kramdown:
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false # Disable line numbers in code blocks
+
+# HTML Compression Settings
+compress_html:
+  clippings: all
+  comments: all
+  endings: all
+  blanklines: false # Compress blank lines
+
+# Footer and Back to Top Link Configuration
+back_to_top: false
+footer_content: ''
+last_edit_timestamp: false
+gh_edit_link: false
+
+# Liquid Template Engine Settings
+liquid:
+  error_mode: strict
+  strict_filters: true # Use strict filters in Liquid
+include: ['.well-known']
