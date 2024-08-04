@@ -1,0 +1,86 @@
+#!/bin/bash
+
+# Uploads files to a bucket with the same name as the current directory
+
+# Global Variables
+BUCKET="s3://$(basename "$(pwd)")"
+CHANGES_MADE=false
+
+# Check S3 bucket accessibility
+check_bucket_access() {
+    if ! aws s3 ls "$BUCKET" > /dev/null; then
+        printf "Unable to access the bucket %s.\n" "$BUCKET" >&2
+        return 1
+    fi
+}
+
+# Get the ETag (MD5 hash) of a local file
+get_local_etag() {
+    local filename="$1"
+    local etag
+    if command -v md5sum > /dev/null; then
+        etag=$(md5sum "$filename" | awk '{ print $1 }')
+    else
+        etag=$(md5 -q "$filename")
+    fi
+    printf "%s" "$etag"
+}
+
+# Upload file to S3 with correct Content-Type
+upload_file() {
+    local filename="$1"
+    local key="${filename#$(pwd)/}"
+    local existing_object existing_mime_type existing_etag local_etag
+
+    if existing_object=$(aws s3api head-object --bucket "$(basename "$(pwd)")" --key "$key" 2>/dev/null); then
+        existing_mime_type=$(echo "$existing_object" | jq -r '.ContentType')
+        existing_etag=$(echo "$existing_object" | jq -r '.ETag' | tr -d '"')
+        local_etag=$(get_local_etag "$filename")
+
+        if [[ "$existing_etag" == "$local_etag" ]]; then
+            printf "File %s has not changed, skipping upload.\n" "$key"
+            return
+        fi
+    fi
+
+    if [[ -n "$existing_mime_type" ]]; then
+        printf "Using existing MIME type %s for %s\n" "$existing_mime_type" "$key"
+        aws s3 cp "$filename" "$BUCKET/$key" --content-type "$existing_mime_type"
+    else
+        printf "No existing MIME type found for %s, uploading without Content-Type.\n" "$key"
+        aws s3 cp "$filename" "$BUCKET/$key"
+    fi
+
+    CHANGES_MADE=true
+}
+
+# Upload all files in current directory to S3
+upload_files() {
+    find "$(pwd)" -type f | while IFS= read -r filename; do
+        upload_file "$filename"
+    done
+}
+
+# Invalidate CloudFront distribution if changes were made
+invalidate_cloudfront() {
+    if [[ "$CHANGES_MADE" = true ]]; then
+        local distribution_id
+        distribution_id=$(aws cloudfront list-distributions | jq -r --arg bucket_name "$(basename "$(pwd)")" '.DistributionList.Items[] | select(.Origins.Items[].Id == $bucket_name).Id')
+
+        if [[ -n "$distribution_id" ]]; then
+            printf "Publishing CloudFront invalidation for distribution ID: %s\n" "$distribution_id"
+            aws cloudfront create-invalidation --no-cli-pager --distribution-id "$distribution_id" --paths '/*' | jq -c .
+        fi
+    else
+        printf "No changes detected, CloudFront invalidation not required.\n"
+    fi
+}
+
+# Main function
+main() {
+    check_bucket_access || exit 1
+    upload_files
+    invalidate_cloudfront
+}
+
+main "$@"

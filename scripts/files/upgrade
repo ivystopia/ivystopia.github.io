@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Ensure the script runs with sudo privileges
+sudo true
+
+# Function to print a newline followed by a line of '-' characters
+separator() {
+    echo
+    printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -
+}
+
+# Function to remove old kernels
+remove_old_kernels() {
+    echo "Removing old kernels..."
+    local kernels_to_remove
+    kernels_to_remove=$(dpkg --list | grep -P -o 'linux-(headers|image|modules)-\d+\.\d+\.\d+-\d+' | grep -v "$(uname -r | cut -d- -f1,2)")
+    sudo apt-get purge -y $kernels_to_remove
+    separator
+}
+
+# Function to run a command and print a separator afterwards
+run_cmd() {
+    echo "Running: $1"
+    eval "$1"
+    separator
+}
+
+# Upgrade packages from APT
+run_cmd "sudo apt-get update"
+run_cmd "sudo apt-get upgrade -y"
+run_cmd "sudo apt-get dist-upgrade -y"
+run_cmd "sudo apt-get autoremove -y"
+run_cmd "sudo apt-get check"
+run_cmd "sudo deborphan | xargs sudo apt-get -y remove --purge"
+run_cmd "sudo apt-get install --fix-missing -y"
+
+# Remove old kernels (keep the current one and one backup)
+remove_old_kernels
+
+# Clean up after APT tasks
+run_cmd "sudo apt-get autoclean"
+run_cmd "sudo apt-get clean"

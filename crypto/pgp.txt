@@ -1,0 +1,53 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+
+
+Monero (XMR)
+Address:
+8C7Yq3S1GfNa3x1XKRNXuMR1kK88HXoGPjSN4fh62tHa6KZcoxeo5JHEoS7GvAjDxe12dgBKTEgxwJEEvXkhLeRC77LfNog
+
+
+Ethereum (ETH)
+Address:
+0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
+
+Bitcoin (BTC)
+Address:
+bc1qpfst9q796znxunkd4enxavgav2gcv3jgaz7st6
+
+
+Litecoin (LTC)
+Address:
+ltc1qs60djrzq0c5mus52dccsaac4ker4hpvj3ppl7q
+
+
+Dogecoin (DOGE)
+Address:
+DQfhvxmKUfvqwaUKi6oN5D1vfnx6F1SStZ
+
+
+Bitcoin Cash (BCH)
+Address:
+qpcfsrc7fe26zyrqwfpapq5jl5r2kdcxxstc5kjwrp
+
+
+Solana (SOL)
+Address:
+CSWmiWuPkPoqFshafUMAWvLq5UiAqaqh1MKw3MxZmKdF
+
+
+Zcash (ZEC)
+Address:
+t1WxwE7RxHBkFrh4Zz2vURFeWAeQsVgf6w6
+
+
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQTjLUz4jo69amB8UzjcgfzirzWRaAUCZmptZgAKCRDcgfzirzWR
+aJ32AP9esm2iFo9hH0wXyRxQar2LaiywHOD3uKcI8MZdKiP0yAD9EVmzUA0Ca5K6
+Yvef1R2Q5V22WC6xHBnzDyrmMa3gNw8=
+=giEP
+-----END PGP SIGNATURE-----

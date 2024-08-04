@@ -1,0 +1,76 @@
+# Default logging configuration for all services
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: '10m'
+    max-file: '10'
+
+services:
+  # Monero Node Service
+  monero-node:
+    container_name: Monero-Node
+    image: ghcr.io/sethforprivacy/simple-monerod:latest
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - .env
+    volumes:
+      - bitmonero:/home/monero/.bitmonero
+      - ./monero-node-resolv.conf:/etc/resolv.conf
+    ports:
+      - '18080:18080' # P2P Network (WAN OK)
+      - '18081:18081' # RPC (LAN only!)
+      - '18083:18083' # ZMQ (LAN only!)
+    command: |
+      --out-peers 64
+      --in-peers 16
+      --enable-dns-blocklist
+      --data-dir /home/monero/.bitmonero
+      --limit-rate 51200
+      --enforce-dns-checkpointing
+      --db-sync-mode fast
+      --log-level 0
+      --max-log-file-size 6553600
+      --max-log-files 4
+      --rpc-bind-ip 0.0.0.0
+      --confirm-external-bind
+      --zmq-pub=tcp://0.0.0.0:18083
+      --no-igd
+    environment:
+      - TERM=xterm-256color
+    cpus: 1
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', 'http://localhost:18081/get_info']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Pi-hole Service
+  pihole:
+    container_name: Pi-hole
+    image: pihole/pihole:latest
+    logging: *default-logging
+    env_file:
+      - .env
+    ports:
+      - '53:53/tcp' # DNS TCP (LAN only!)
+      - '53:53/udp' # DNS UDP (LAN only!)
+      - '3141:80/tcp' # Admin Interface (LAN only!)
+    environment:
+      TZ: 'Europe/London'
+      WEBPASSWORD: ${PIHOLE_PASSWORD}
+    volumes:
+      - pihole_data:/etc/pihole
+      - dnsmasq_data:/etc/dnsmasq.d
+    restart: unless-stopped
+
+# Default network
+networks:
+  default:
+    driver: bridge
+
+# Volume definitions
+volumes:
+  pihole_data: {} # Pi-hole application config
+  dnsmasq_data: {} # Pi-hole DNS server config
+  bitmonero: {} # Monero node configuration & blockchain data

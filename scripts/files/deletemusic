@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# Deletes the Glacier vault called Music
+# Even though it's not empty
+# It can take hours to run
+# I left it overnight and it worked
+
+# AWS_PROFILE must be set
+
+# TODO: Make the script more generic
+
+# Define variables
+VAULT_NAME="Music"
+ACCOUNT_ID="-"  # Use '-' to use the default account ID associated with the AWS credentials
+REGION="eu-west-1"
+INVENTORY_FILE="output.json"
+
+#export PAGER=cat
+
+# Function to log messages
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+# Function to handle errors
+handle_error() {
+    log "Error: $1"
+    exit 1
+}
+
+# Step 1: Initiate inventory retrieval job
+log "Initiating inventory retrieval job..."
+JOB_ID=$(aws glacier initiate-job --account-id="$ACCOUNT_ID" --vault-name="$VAULT_NAME" --region="$REGION" --job-parameters='{"Type": "inventory-retrieval"}' --query='jobId' --output=text) || handle_error "Failed to initiate inventory retrieval job"
+
+log "Inventory retrieval job initiated with Job ID: $JOB_ID"
+
+# Step 2: Wait for the job to complete (This can take several hours)
+log "Waiting for job to complete... (This might take several hours)"
+while true; do
+    STATUS=$(aws glacier describe-job --account-id="$ACCOUNT_ID" --vault-name="$VAULT_NAME" --region="$REGION" --job-id="$JOB_ID" --query='StatusCode' --output=text) || handle_error "Failed to describe job status"
+    if [ "$STATUS" == "Succeeded" ]; then
+        log "Job completed successfully."
+        break
+    fi
+    log "Job status: $STATUS. Checking again in 5 minutes..."
+    sleep 300
+done
+
+# Step 3: Retrieve the inventory
+log "Retrieving inventory..."
+aws glacier get-job-output --account-id="$ACCOUNT_ID" --vault-name="$VAULT_NAME" --region="$REGION" --job-id="$JOB_ID" output.json || handle_error "Failed to retrieve job output"
+
+# Step 4: Check if the inventory file exists
+if [ ! -f "$INVENTORY_FILE" ]; then
+    handle_error "Inventory file $INVENTORY_FILE not found."
+fi
+
+# Step 5: Delete all archives
+log "Deleting all archives..."
+jq -r '.ArchiveList[].ArchiveId' "$INVENTORY_FILE" | while IFS= read -r archiveId; do
+    log "Attempting to delete archive: $archiveId"
+    command="aws glacier delete-archive --vault-name=\"$VAULT_NAME\" --account-id=\"$ACCOUNT_ID\" --region=\"$REGION\" --archive-id=\"$archiveId\""
+    eval "$command"
+    if [ $? -eq 0 ]; then
+        log "Deleted archive: $archiveId"
+    else
+        log "Error: Failed to delete archive: $archiveId"
+    fi
+done
+
+# Step 6: Wait before attempting to delete the vault
+log "Waiting for vault to be ready for deletion..."
+sleep 600
+while true; do
+    VAULT_STATUS=$(aws glacier describe-vault --account-id="$ACCOUNT_ID" --vault-name="$VAULT_NAME" --region="$REGION" --query='VaultName' --output=text)
+    if [ "$VAULT_STATUS" == "$VAULT_NAME" ]; then
+        log "Vault is ready for deletion."
+        break
+    fi
+    log "Vault not ready for deletion. Waiting for 5 minutes..."
+    sleep 300
+done
+
+# Step 7: Delete the vault
+log "Deleting the vault..."
+aws glacier delete-vault --account-id="$ACCOUNT_ID" --vault-name="$VAULT_NAME" --region="$REGION" || handle_error "Failed to delete vault"
+
+log "Vault $VAULT_NAME deleted successfully."
