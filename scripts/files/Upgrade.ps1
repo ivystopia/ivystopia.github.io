@@ -243,7 +243,8 @@ try {
     choco upgrade chocolatey -y | Out-Null
     Write-Success "Chocolatey updated successfully."
 
-    choco upgrade all -y --no-progress
+    # choco install choco-upgrade-all-at
+    choco-upgrade-all
     Write-Success "All Chocolatey packages upgraded successfully."
 
     choco cache clean | Out-Null
