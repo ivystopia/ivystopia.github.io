@@ -48,6 +48,24 @@ For ETH and ERC-20 tokens (on Ethereum).
 
      0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
 
+## Arbitrum One (ETH)
+
+For ETH and ERC-20 tokens (on Arbitrum One).
+
+     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
+## Base (ETH)
+
+For ETH and ERC-20 tokens (on Base).
+
+     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
+## Optimism (ETH)
+
+For ETH and ERC-20 tokens (on Optimism).
+
+     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
 ## BNB Smart Chain (BNB)
 
 For BNB and BEP-20 tokens (on BNB Smart Chain).
@@ -67,12 +85,12 @@ For ADA and native Cardano tokens.
      addr1q8a7smvcwcxzng5cn8sau6h7k9ltqy43nr34gt3rz9n3whgjpt5mxmpgg2vx7d4978m29hsumkneycsks0xe76yxnz6sxhsuk8
 -----BEGIN PGP SIGNATURE-----
 
-iQEzBAEBCAAdFiEEl/1IQo/YK4MqUOcCdymaRBtTgN4FAmebQWQACgkQdymaRBtT
-gN5dhwgApD5hVHEMACuvpO7P8Rksz+UKdziqkX749eVMGEgICTpHxkHGB/VuCIR2
-fZAeIGiYiahMh3AesyFgvF+OdyY29REXF1h0y3GWx9GLXZIoVncoFESTXWDwZhIw
-N/jU1NR72U06HQ5LOwuyzq8cMvb9Rlc55qRU3NZzPr85xV8PK2SGthvGrw35UV0f
-c2ZdxKfe7RoNUsySp5HrQR6kjJaZSILfFdhyo09uBvhF+tI1Lh75yPTWqrwXtT7G
-Kne7+6GNZa4jeYv2t9EuiAljOhCSG/9emBpt3sbngkyC3kxq9Jss15FEpz99Yp4k
-1mYzf3GqxMjNaiG9heXtnJET2WmhOQ==
-=SfgO
+iQEzBAEBCAAdFiEEl/1IQo/YK4MqUOcCdymaRBtTgN4FAmewV+gACgkQdymaRBtT
+gN5ESQgAs2ZD25QCn7JzVqlIhZ52/ypSwh+gNWC+YMEk1ZRhZU6+veH+fZJZ03WU
+Ldhz3v6RJ+fla7lAsVuuRlDfnF/4/6NEjff8fo+sAnrG/Ep4I8Wgym7ntXTpTk87
+JQK+d+A5yfA3yiT4AZG4PaWEmsG08qGmtok94pGPBLR48Vim9mIMbFUe2eHCmZMm
+KNj29ULY7z51vDRbXP8ZazcV/99dKk8htATOq8PO26coxBm2V6GdqgRPdD3Lton8
+cC6B16iacMvBrAsJlBSr3YFw+eJ7+LHtuCbAlkKA90f8uNlJosCpWW9ia4qjjqgJ
+nTryIQcYlSdIuFfTT0L1Hw/F6FCNOA==
+=nRuW
 -----END PGP SIGNATURE-----

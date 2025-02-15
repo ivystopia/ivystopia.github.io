@@ -45,6 +45,24 @@ For ETH and ERC-20 tokens (on Ethereum).
 
      0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
 
+## Arbitrum One (ETH)
+
+For ETH and ERC-20 tokens (on Arbitrum One).
+
+     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
+## Base (ETH)
+
+For ETH and ERC-20 tokens (on Base).
+
+     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
+## Optimism (ETH)
+
+For ETH and ERC-20 tokens (on Optimism).
+
+     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
+
 ## BNB Smart Chain (BNB)
 
 For BNB and BEP-20 tokens (on BNB Smart Chain).
