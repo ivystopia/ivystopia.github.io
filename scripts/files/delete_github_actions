@@ -11,12 +11,7 @@ fetch_workflow_runs() {
     response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
         "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/runs")
 
-    # Output the raw JSON response for debugging
-    echo "----- Raw API Response Start -----"
-    echo "$response"
-    echo "----- Raw API Response End -----"
-
-    # Proceed to extract run IDs
+    # Extract run IDs
     echo "$response" | jq -r '.workflow_runs[] | select(.name == "pages build and deployment") | .id'
 }
 
@@ -46,10 +41,8 @@ while true; do
         while curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/actions/runs/$run_id" |
             jq -e '.id' >/dev/null; do
-            echo "Workflow run ID: $run_id still exists. Retrying in $SLEEP_INTERVAL seconds..."
             sleep $SLEEP_INTERVAL
             delete_workflow_run $run_id
-            # Increase sleep interval up to the maximum
             if [ $SLEEP_INTERVAL -lt $MAX_SLEEP_INTERVAL ]; then
                 SLEEP_INTERVAL=$((SLEEP_INTERVAL + 1))
             fi
