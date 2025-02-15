@@ -255,6 +255,11 @@ catch {
 }
 Write-Separator
 
+# Sometimes Spicetify breaks after Spotify upgrade
+# It's always safe to run this command
+Write-Info "Upgrading Spicetify..."
+spicetify update
+
 # ===========================================
 #                Upgrade Report
 # ===========================================
