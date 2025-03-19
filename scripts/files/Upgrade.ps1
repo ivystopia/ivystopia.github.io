@@ -250,6 +250,9 @@ try {
 
     choco cache clean | Out-Null
     Write-Success "Chocolatey cache cleaned successfully."
+
+    choco-shortcuts
+    Write-Success "Chocolatey Start menu shortcuts refreshed."
 }
 catch {
     Write-WarningMsg "Failed to perform some Chocolatey operations."
