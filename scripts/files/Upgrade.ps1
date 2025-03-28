@@ -166,22 +166,26 @@ Write-Separator
 # ===========================================
 Write-Info "Upgrading Chocolatey packages..."
 try {
+    # Upgrade the Chocolatey package manager first
+    Write-Info "Upgrading Chocolatey..."
     choco upgrade chocolatey -y | Out-Null
     Write-Success "Chocolatey updated successfully."
 
-    # choco install choco-upgrade-all-at
-    Write-Info "Running choco-upgrade-all, please wait a minute."
-    choco-upgrade-all
-    Write-Success "All Chocolatey packages upgraded successfully."
-
+    # Upgrade all other packages
+    Write-Info "Upgrading all packages..."
+    choco upgrade all -y | Out-Null
     choco cache clean | Out-Null
-    Write-Success "Chocolatey cache cleaned successfully."
+    Write-Success "Finished upgrading packages."
 
+    # Refresh Chocolatey Start menu shortcuts
+    # Note: 'choco-shortcuts' is aliased to Add-ChocolateyStartMenuShortcuts.ps1
+    Write-Info "Refreshing Chocolatey Start menu shortcuts..."
     choco-shortcuts
     Write-Success "Chocolatey Start menu shortcuts refreshed."
 }
 catch {
     Write-WarningMsg "Failed to perform some Chocolatey operations."
+    Write-WarningMsg "Error Details: $($_.Exception.Message)"
 }
 Write-Separator
 
