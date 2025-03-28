@@ -41,6 +41,15 @@ if (-not $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administ
 }
 
 # ===========================================
+#           Pending Reboot Check
+# ===========================================
+$rebootKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
+if (Test-Path $rebootKey) {
+    Write-WarningMsg "A pending reboot is detected. Press Enter to continue or Ctrl-C to abort."
+    [void][System.Console]::ReadLine()
+}
+
+# ===========================================
 #                   Preferences
 # ===========================================
 $VerbosePreference = 'SilentlyContinue'  # Suppress global verbose messages
