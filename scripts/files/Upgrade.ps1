@@ -2,8 +2,6 @@
 #       Pre-reboot Windows Update Script
 # ===========================================
 
-$ssdDrives = @("C", "E") # Windows sucks at detecting SSDs
-
 # Function Definitions for Consistent Output
 function Write-Info {
     param ([string]$Message)
