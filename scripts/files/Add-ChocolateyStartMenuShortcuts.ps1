@@ -71,11 +71,10 @@ Get-ChildItem -Path "C:\ProgramData\chocolatey\lib" -Directory | ForEach-Object 
                 Write-Error "Failed to create shortcut for $pkgId. Error: $_"
             }
         }
-        else {
-            Write-Host "Shortcut for $pkgId already exists."
-        }
     }
     else {
         Write-Verbose "No executable found for package $pkgId."
     }
 }
+
+Write-Host "DONE $($MyInvocation.MyCommand.Name)"
