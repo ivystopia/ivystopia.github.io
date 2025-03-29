@@ -66,7 +66,7 @@ Write-Separator
 #       Ensure Essential Services Are Running
 # ===========================================
 Write-Info "Ensuring essential services are running..."
-$services = @("wuauserv", "bits", "cryptsvc", "msiserver")
+$services = @("wuauserv", "bits", "cryptsvc", "msiserver", "w32time")
 foreach ($service in $services) {
     try {
         $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
@@ -116,9 +116,8 @@ catch {
 # ===========================================
 #             Synchronize System Time
 # ===========================================
-Write-Info "Starting time synchronization..."
+Write-Info "Synchronizing system time..."
 try {
-    net start w32time | Out-Null
     w32tm /resync /force | Out-Null
     Write-Success "Time synchronization completed."
 }
