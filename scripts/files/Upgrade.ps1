@@ -93,25 +93,25 @@ Write-Separator
 # ===========================================
 #               Clean Up Temporary Files
 # ===========================================
-Write-Info "Cleaning up temporary files..."
+Write-Info "Running Disk Cleanup..."
 try {
-    # Get the temp directory path
-    $tempDir = $env:TEMP
-
-    # Check if the temp directory exists
-    if (Test-Path -Path $tempDir) {
-        # Remove all files and subdirectories in the temp directory
-        Get-ChildItem -Path $tempDir -Recurse -Force | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-
-        Write-Success "Temporary files cleaned up successfully."
+    # Runs Disk Cleanup on all drives, using the settings from sageset 1
+    Start-Process -FilePath "cleanmgr" -ArgumentList '/sagerun:1'
+    
+    # Close popup window once Disk Cleanup completes
+    while ((Get-Process -Name "cleanmgr" -ErrorAction SilentlyContinue) -and ((Get-Process -Name "cleanmgr").MainWindowTitle -ne "Disk Space Notification")) {
+        Write-Host -NoNewline "."
+        Start-Sleep -Seconds 1
     }
-    else {
-        Write-WarningMsg "Temp directory does not exist: $tempDir"
-    }
+    Stop-Process -Name "cleanmgr" -Force -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Success "Disk Cleanup completed."
 }
 catch {
-    Write-WarningMsg "An error occurred while cleaning up temporary files: $($_.Exception.Message)"
+    Write-WarningMsg "An error occurred during Disk Cleanup: $($_.Exception.Message)"
 }
+Write-Separator
 
 # ===========================================
 #             Synchronize System Time
