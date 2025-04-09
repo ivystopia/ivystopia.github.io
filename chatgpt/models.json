@@ -1,0 +1,112 @@
+{
+  "models": {
+    "o1": {
+      "pros": [
+        "Excels in complex coding and debugging with detailed, accurate outputs.",
+        "High general knowledge accuracy with minimal hallucinations.",
+        "Produces coherent, contextually appropriate creative content.",
+        "Effective multi-step reasoning for advanced mathematical problems."
+      ],
+      "cons": ["Slower response times compared to other models.", "Higher computational resource requirements."],
+      "prompting_tips": "Provide detailed, context-rich prompts for complex reasoning tasks.",
+      "output_style": "Detailed and analytical.",
+      "best_use_cases": ["Complex coding and debugging", "In-depth research and factual inquiries", "Advanced mathematical problem solving"],
+      "source_links": ["https://platform.openai.com/docs/models", "https://en.wikipedia.org/wiki/ChatGPT"],
+      "features": {
+        "advanced_reasoning": true,
+        "chain_of_thought_processing": true,
+        "function_calling": true,
+        "structured_outputs": true,
+        "streaming": true,
+        "vision_capabilities": true,
+        "reinforcement_learning": true,
+        "safety_compliance": true,
+        "browsing_capability": false
+      }
+    },
+    "o3-mini": {
+      "pros": [
+        "Strong coding capabilities with fast response times.",
+        "Balances speed and accuracy in general knowledge tasks.",
+        "Efficient creative content generation for everyday tasks.",
+        "Quick performance on routine mathematical problems."
+      ],
+      "cons": ["May struggle with highly complex or nuanced tasks.", "Less effective in highly detailed creative writing."],
+      "prompting_tips": "Use concise prompts for routine queries to maximize speed and efficiency.",
+      "output_style": "Concise and efficient.",
+      "best_use_cases": ["Routine coding tasks", "General information retrieval", "Standard creative writing and content generation"],
+      "source_links": ["https://platform.openai.com/docs/models", "https://help.openai.com/en/articles/7864572-what-is-the-chatgpt-model-selector"],
+      "features": {
+        "adjustable_reasoning_levels": true,
+        "function_calling": true,
+        "structured_outputs": true,
+        "developer_messages": true,
+        "streaming": true,
+        "enhanced_reasoning": true,
+        "coding_capabilities": true,
+        "multimodal_capabilities": true,
+        "cost_effectiveness": true,
+        "browsing_capability": true
+      }
+    },
+    "o3-mini-high": {
+      "pros": [
+        "Enhanced reasoning for more complex coding scenarios.",
+        "Maintains high accuracy in information retrieval.",
+        "Delivers nuanced and detailed creative outputs.",
+        "Improved capability for advanced mathematical reasoning."
+      ],
+      "cons": ["Output quality may not fully match o1 in extremely complex tasks.", "Requires more computational resources than o3-mini."],
+      "prompting_tips": "Frame prompts that demand deep reasoning to leverage its enhanced capabilities.",
+      "output_style": "Analytical and detailed.",
+      "best_use_cases": ["Complex coding and debugging tasks", "In-depth research with intricate reasoning", "Advanced creative writing projects"],
+      "source_links": ["https://openai.com/index/openai-o3-mini/", "https://zapier.com/blog/openai-o1/"],
+      "features": {
+        "high_reasoning_effort": true,
+        "function_calling": true,
+        "structured_outputs": true,
+        "developer_messages": true,
+        "streaming": true,
+        "enhanced_reasoning": true,
+        "improved_coding_capabilities": true,
+        "multimodal_capabilities": true,
+        "cost_effectiveness": true,
+        "browsing_capability": true
+      }
+    },
+    "GPT-4.5": {
+      "pros": [
+        "Enhanced conversational abilities with improved pattern recognition.",
+        "Supports image processing and function calling.",
+        "Excels in creative writing with natural, intuitive outputs.",
+        "Improved instruction adherence and file handling."
+      ],
+      "cons": [
+        "Significantly higher cost compared to other models.",
+        "Smaller context window (128K tokens) versus o3-mini's 200K tokens.",
+        "May underperform in highly complex reasoning compared to specialized models like o1."
+      ],
+      "prompting_tips": "Use open-ended prompts to harness its creative and conversational strengths.",
+      "output_style": "Conversational and creative.",
+      "best_use_cases": ["Creative writing and content generation", "Natural, intuitive conversation tasks", "Projects involving image processing or function calling"],
+      "source_links": [
+        "https://openai.com/index/introducing-gpt-4-5/",
+        "https://www.techtarget.com/whatis/feature/GPT-45-explained-Everything-you-need-to-know",
+        "https://help.openai.com/en/articles/10658365-gpt-4-5-in-chatgpt"
+      ],
+      "features": {
+        "enhanced_conversational_abilities": true,
+        "emotional_intelligence": true,
+        "function_calling": true,
+        "structured_outputs": true,
+        "streaming": true,
+        "vision_capabilities": true,
+        "reduced_hallucinations": true,
+        "enhanced_creativity": true,
+        "multilingual_proficiency": true,
+        "large_context_window": true,
+        "browsing_capability": true
+      }
+    }
+  }
+}
