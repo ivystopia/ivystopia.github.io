@@ -1,1 +1,6 @@
-_site
+# Ignore the generated site directory
+_site/
+
+# Ignore Jekyll cache and metadata files
+.jekyll-cache/
+.jekyll-metadata

@@ -74,3 +74,6 @@ gh_edit_link: false               # Hide "edit on GitHub" link
 liquid:
   error_mode: strict               # fail on any Liquid error
   strict_filters: true             # fail on unknown filters
+
+# Local environment options
+incremental: true
