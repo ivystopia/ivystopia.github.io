@@ -13,5 +13,15 @@
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "prettier.tabWidth": 4,
         "editor.insertSpaces": true
+    },
+    "[jsonc]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "prettier.tabWidth": 4,
+        "editor.insertSpaces": true
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "prettier.tabWidth": 4,
+        "editor.insertSpaces": true
     }
 }
