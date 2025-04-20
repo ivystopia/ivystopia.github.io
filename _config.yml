@@ -4,6 +4,7 @@ title: ""
 # Remote theme plugin
 plugins:
   - jekyll-remote-theme
+  - jekyll-sitemap
 remote_theme: just-the-docs/just-the-docs@v0.10.1  # https://github.com/just-the-docs/just-the-docs/releases/tag/v0.10.1
 
 # Collections & defaults
