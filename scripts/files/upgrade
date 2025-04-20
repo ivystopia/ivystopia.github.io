@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env zsh
 
 # This script automates system maintenance tasks on Ubuntu:
 #   1. Upgrades system packages via APT
@@ -16,12 +16,14 @@
 
 sudo true
 set -euo pipefail
+setopt MULTIOS
+trap 'error_exit "on line $LINENO"' ERR
 
 # Define colors for output
-GREEN="\033[1;32m"
-RED="\033[1;31m"
-BLUE="\033[1;34m"
-RESET="\033[0m"
+typeset -r GREEN="\033[1;32m"
+typeset -r RED="\033[1;31m"
+typeset -r BLUE="\033[1;34m"
+typeset -r RESET="\033[0m"
 
 # Create a log file in /tmp/ with the current datestamp
 LOG_FILE="/tmp/log-upgrade-$(date +%Y%m%d%H%M%S).log"
@@ -44,10 +46,8 @@ print_in_color() {
 
 # Print a separator line for clarity in log output
 print_separator() {
-    local cols
-    cols=$(tput cols || echo 80)
-    printf '\n'
-    printf '%*s\n' "$cols" '' | tr ' ' '-'
+    local cols=${COLUMNS:-80}
+    printf '\n%*s\n' "$cols" '' | tr ' ' '-'
 }
 
 # Handle errors and exit the script gracefully
@@ -59,20 +59,14 @@ error_exit() {
 
 # Run a command and print a separator afterwards
 run_cmd() {
-    local cmd="$1"
-    print_in_color "$BLUE" "Running: $cmd"
-    if ! eval "$cmd"; then
-        error_exit "Command failed: $cmd"
-    fi
+    print_in_color "$BLUE" "Running: $*"
+    "$@" || error_exit "Command failed: $*"
     print_separator
 }
 
 # Ensure a command is available, exits if not found
 ensure_command() {
-    local cmd="$1"
-    if ! command -v "$cmd" &>/dev/null; then
-        error_exit "Required command '$cmd' is not installed. Please install it and rerun the script."
-    fi
+    command -v "$1" &>/dev/null || error_exit "Required command '$1' is not installed. Please install it and rerun the script."
 }
 
 # Verify all required commands are available
@@ -92,38 +86,40 @@ verify_dependencies() {
 # Upgrade system packages using APT
 upgrade_apt_packages() {
     print_in_color "$GREEN" "Upgrading APT packages..."
-    run_cmd "sudo apt-get update"
-    run_cmd "sudo apt-get install --fix-broken -y"
-    run_cmd "sudo apt-get full-upgrade -y"
-    run_cmd "sudo apt-get autoremove -y"
-    run_cmd "sudo apt-get autoclean"
-    run_cmd "sudo apt-get clean"
+    run_cmd sudo apt-get update
+    run_cmd sudo apt-get install --fix-broken -y
+    run_cmd sudo apt-get full-upgrade -y
+    run_cmd sudo apt-get autoremove -y
+    run_cmd sudo apt-get autoclean
+    run_cmd sudo apt-get clean
 }
 
 # Upgrade pip and its packages
 upgrade_pip_packages() {
     print_in_color "$GREEN" "Upgrading pip packages..."
-    run_cmd "pip3 install --break-system-packages --upgrade pip --user"
+    run_cmd pip3 install --break-system-packages --upgrade pip --user
 
     local pip_outdated
-    pip_outdated=$(pip3 list --outdated --format=json | python3 -c "import json, sys; packages=[pkg['name'] for pkg in json.load(sys.stdin)]; print(' '.join(packages))")
+    pip_outdated=$(pip3 list --outdated --format=json |
+        python3 -c 'import json,sys; print(" ".join(pkg["name"] for pkg in json.load(sys.stdin)))')
 
-    if [[ -n "$pip_outdated" ]]; then
+    if [[ -n $pip_outdated ]]; then
         print_in_color "$BLUE" "Upgrading the following pip packages:\n$pip_outdated"
         for pkg in $pip_outdated; do
-            run_cmd "pip3 install --break-system-packages --upgrade $pkg --user"
+            run_cmd pip3 install --break-system-packages --upgrade "$pkg" --user
         done
     else
         print_in_color "$GREEN" "All pip packages are up-to-date."
         print_separator
     fi
-    run_cmd "pip cache purge"
+
+    run_cmd pip3 cache purge
 }
 
 # Upgrade Cargo packages
 upgrade_cargo_packages() {
     print_in_color "$GREEN" "Upgrading Cargo packages..."
-    run_cmd "cargo install-update install-update"
+    run_cmd cargo install-update install-update
     print_in_color "$GREEN" "Cargo packages up-to-date."
     print_separator
 }
@@ -131,7 +127,7 @@ upgrade_cargo_packages() {
 # Update tldr manpages
 update_tldr_pages() {
     print_in_color "$GREEN" "Updating tealdeer..."
-    run_cmd "tldr --update"
+    run_cmd tldr --update
     print_in_color "$GREEN" "tealdeer manpages updated."
     print_separator
 }
@@ -144,7 +140,7 @@ remove_orphaned_packages() {
 
     if [[ -n "$orphans" ]]; then
         print_in_color "$BLUE" "Orphaned packages found:\n$orphans"
-        run_cmd "sudo apt-get purge -y $orphans"
+        run_cmd sudo apt-get purge -y $orphans
     else
         print_in_color "$GREEN" "No orphaned packages to remove."
         print_separator
@@ -154,34 +150,25 @@ remove_orphaned_packages() {
 # Safely remove old kernels using purge-old-kernels
 remove_old_kernels() {
     print_in_color "$GREEN" "Removing old kernels..."
-    run_cmd "sudo purge-old-kernels -y"
+    run_cmd sudo purge-old-kernels -y
 }
 
 # Clean journal logs, limiting size to 100MB
 clean_journal_logs() {
     print_in_color "$GREEN" "Cleaning journal logs..."
-    run_cmd "sudo journalctl --vacuum-size=100M"
+    run_cmd sudo journalctl --vacuum-size=100M
 }
 
 # Update Oh My Zsh
 upgrade_oh_my_zsh() {
-    print_in_color "$GREEN" "Updating Oh My Zsh..."
-    local oh_my_zsh_dir="$HOME/.oh-my-zsh"
-
-    if [[ -d "$oh_my_zsh_dir" ]]; then
-        pushd "$oh_my_zsh_dir" >/dev/null
-        run_cmd "git pull"
-        popd >/dev/null
-    else
-        print_in_color "$GREEN" "Oh My Zsh is not installed."
-        print_separator
-    fi
+    print_in_color "$GREEN" "Updating Oh My Zsh…"
+    run_cmd "$HOME/.oh-my-zsh/tools/upgrade.sh"
 }
 
 # Clean up old log files older than 7 days in /tmp
 clean_old_logs() {
     print_in_color "$GREEN" "Cleaning up old log files..."
-    run_cmd "sudo find /tmp/ -type f -name 'log-upgrade-*.log' -mtime +7 -exec rm {} \;"
+    run_cmd sudo find /tmp/ -type f -name 'log-upgrade-*.log' -mtime +7 -exec rm {} +
     print_in_color "$GREEN" "Old log files cleaned up."
     print_separator
 }
