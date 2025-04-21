@@ -96,16 +96,24 @@ upgrade_apt_packages() {
 
 # Upgrade pip and its packages
 upgrade_pip_packages() {
-    print_in_color "$GREEN" "Upgrading pip packages..."
+    print_in_color "$GREEN" "Upgrading pip itself…"
     run_cmd pip3 install --break-system-packages --upgrade pip --user
 
-    local pip_outdated
-    pip_outdated=$(pip3 list --outdated --format=json |
-        python3 -c 'import json,sys; print(" ".join(pkg["name"] for pkg in json.load(sys.stdin)))')
+    local pip_outdated_str
+    pip_outdated_str=$(
+        pip3 list --outdated --format=json |
+            python3 -c '
+import json,sys
+print(" ".join(pkg["name"] for pkg in json.load(sys.stdin)))
+'
+    )
 
-    if [[ -n $pip_outdated ]]; then
-        print_in_color "$BLUE" "Upgrading the following pip packages:\n$pip_outdated"
-        for pkg in $pip_outdated; do
+    local -a pip_outdated
+    IFS=$' \t\n' read -A pip_outdated <<<"$pip_outdated_str"
+
+    if ((${#pip_outdated} > 0)); then
+        print_in_color "$BLUE" "Upgrading the following pip packages: ${pip_outdated[*]}"
+        for pkg in "${pip_outdated[@]}"; do
             run_cmd pip3 install --break-system-packages --upgrade "$pkg" --user
         done
     else

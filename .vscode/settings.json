@@ -10,7 +10,7 @@
 
     // Explicitly override options based on detected file type
     "[shellscript]": {
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.defaultFormatter": "foxundermoon.shell-format",
         "prettier.tabWidth": 4,
         "editor.insertSpaces": true
     },
