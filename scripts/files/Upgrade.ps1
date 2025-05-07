@@ -155,11 +155,6 @@ try {
     choco upgrade all -y
     choco cache clean
     Write-Success "Finished upgrading packages."
-
-    # Refresh Chocolatey Start menu shortcuts
-    # Note: 'choco-shortcuts' is aliased to Add-ChocolateyStartMenuShortcuts.ps1
-    Write-Info "Refreshing Chocolatey Start menu shortcuts..."
-    choco-shortcuts
 }
 catch {
     Write-WarningMsg "Failed to perform some Chocolatey operations."
