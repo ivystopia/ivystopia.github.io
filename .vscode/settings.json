@@ -1,0 +1,27 @@
+// .vscode/settings.json
+{
+    // Use Prettier to format all files on save
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+    // Use 2-space indentation by default
+    "prettier.tabWidth": 2,
+    "prettier.useTabs": false,
+
+    // Explicitly override options based on detected file type
+    "[shellscript]": {
+        "editor.defaultFormatter": "foxundermoon.shell-format",
+        "prettier.tabWidth": 4,
+        "editor.insertSpaces": true
+    },
+    "[jsonc]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "prettier.tabWidth": 4,
+        "editor.insertSpaces": true
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "prettier.tabWidth": 4,
+        "editor.insertSpaces": true
+    }
+}
