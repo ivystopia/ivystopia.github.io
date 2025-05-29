@@ -30,7 +30,7 @@ exclude:
 enable_copy_code_button: true     # show “copy” icons on code blocks
 search_enabled: false             # disable Lunr search
 heading_anchors: true             # show ¶ links on headings
-color_scheme: dark                # force dark mode
+color_scheme: light               # force light mode
 nav_enabled: false                # turn off global sidebar
 back_to_top: false                # suppress “back to top” link
 
