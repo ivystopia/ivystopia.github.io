@@ -75,8 +75,21 @@ upgrade_pihole() {
     print_separator
 
     print_in_color "$GREEN" "Updating Pi-hole..."
-    run_cmd "sudo pihole -up"
-    run_cmd "sudo pihole -g"
+    local up_output
+    if ! up_output=$(sudo pihole -up 2>&1); then
+        error_exit "Pi-hole upgrade failed"
+    fi
+    print_in_color "$BLUE" "$up_output"
+    print_separator
+
+    # If Pi-hole already refreshed gravity, skip explicit -g
+    if echo "$up_output" | grep -qiE \
+        'Re-?running gravity|Updating gravity|gravity list (was )?updated'; then
+        print_in_color "$GREEN" "Gravity already refreshed during Pi-hole upgrade."
+    else
+        run_cmd "sudo pihole -g"
+    fi
+
     print_in_color "$GREEN" "Pi-hole updated successfully."
     print_separator
 }
