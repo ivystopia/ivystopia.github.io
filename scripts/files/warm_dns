@@ -1,0 +1,118 @@
+#!/bin/bash
+# Pre-warms DNS resolver cache (e.g., for Pi-hole) using domains gathered from:
+# - Firefox history/bookmarks
+# - or a user-provided domain list.
+
+# --- Configuration ---
+DIG_COMMAND="dig +timeout=5 +tries=2"
+WINDOWS_DRIVE="/mnt/c"
+
+# --- Verify required commands are available ---
+REQUIRED_CMDS=(sqlite3 awk dig sort grep cp mktemp cut parallel)
+
+MISSING_CMDS=$(for cmd in "${REQUIRED_CMDS[@]}"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "$cmd"
+    fi
+done)
+
+if [ -n "$MISSING_CMDS" ]; then
+    echo "Error: Missing required commands:"
+    echo "$MISSING_CMDS"
+    exit 1
+fi
+
+# Check for correct version of GNU parallel
+if ! parallel --version 2>&1 | grep -q "GNU parallel"; then
+    echo "Error: GNU parallel is required (not the 'moreutils' version)."
+    exit 1
+fi
+
+# --- Set up input handling and temp files ---
+CUSTOM_DOMAINS_PROVIDED=0
+
+if [ "$#" -eq 0 ]; then
+    DOMAIN_FILE=$(mktemp)
+    PROFILES_FILE=$(mktemp)
+else
+    DOMAIN_FILE="$1"
+    CUSTOM_DOMAINS_PROVIDED=1
+fi
+
+# --- Cleanup handler to remove temp files on exit ---
+cleanup() {
+    if [ "$CUSTOM_DOMAINS_PROVIDED" -eq 0 ]; then
+        rm -f "$DOMAIN_FILE" "$PROFILES_FILE"
+    fi
+}
+trap cleanup EXIT
+trap 'echo; echo "Ctrl-C pressed. Exiting."; cleanup; exit 1' SIGINT
+
+# --- If no domain list provided, extract from Firefox profiles ---
+if [ "$CUSTOM_DOMAINS_PROVIDED" -eq 0 ]; then
+    DB_FOUND=0
+    for userdir in "$WINDOWS_DRIVE"/Users/*; do
+        if [ ! -d "$userdir" ]; then
+            continue
+        fi
+        PROFILES_DIR="$userdir/AppData/Roaming/Mozilla/Firefox/Profiles"
+        if [ ! -d "$PROFILES_DIR" ]; then
+            continue
+        fi
+        for profile in "$PROFILES_DIR"/*; do
+            if [ ! -d "$profile" ]; then
+                continue
+            fi
+            DB="$profile/places.sqlite"
+            if [ -f "$DB" ]; then
+                DB_FOUND=1
+                username=$(basename "$userdir")
+                profile_name=$(basename "$profile")
+                echo "$username : $profile_name" >>"$PROFILES_FILE"
+                TMP_DB=$(mktemp)
+                if ! cp "$DB" "$TMP_DB"; then
+                    echo "Error: Failed to copy database: $DB"
+                    continue
+                fi
+                sqlite3 "$TMP_DB" "SELECT url FROM moz_places;" |
+                    awk -F/ '{ if ($3 != "") print $3 }' |
+                    grep -E '^[A-Za-z0-9.-]+' |
+                    sort -u >>"$DOMAIN_FILE"
+                rm -f "$TMP_DB"
+            fi
+        done
+    done
+    if [ "$DB_FOUND" -eq 0 ]; then
+        echo "No Firefox profiles found. Exiting."
+        exit 1
+    fi
+    sort -u "$DOMAIN_FILE" -o "$DOMAIN_FILE"
+    sort -u "$PROFILES_FILE" -o "$PROFILES_FILE"
+    if [ ! -s "$DOMAIN_FILE" ]; then
+        echo "Firefox profiles contain no history. Exiting."
+        exit 1
+    fi
+fi
+
+# --- Prompt user before performing DNS lookups ---
+DOMAIN_COUNT=$(awk 'END { print NR }' "$DOMAIN_FILE")
+PAD_WIDTH=${#DOMAIN_COUNT}
+echo ""
+
+if [ "$CUSTOM_DOMAINS_PROVIDED" -eq 0 ]; then
+    echo "Ready to look up $DOMAIN_COUNT domains from the following Firefox profiles:"
+    cat "$PROFILES_FILE"
+else
+    echo "Ready to look up $DOMAIN_COUNT domains from file: $DOMAIN_FILE"
+fi
+
+echo ""
+echo "Press Enter to continue or Ctrl-C to quit"
+read -r
+
+# --- Perform DNS lookups in parallel ---
+parallel -j 10 --linebuffer \
+    'printf "Processed %'"$PAD_WIDTH"'d/'"$DOMAIN_COUNT"' : %s\n" {#} {} && '"$DIG_COMMAND"' {} >/dev/null' \
+    :::: "$DOMAIN_FILE"
+
+echo "Complete."
