@@ -1,0 +1,79 @@
+# Site metadata
+title: ""
+
+# Remote theme plugin
+plugins:
+  - jekyll-remote-theme
+  - jekyll-sitemap
+remote_theme: just-the-docs/just-the-docs@v0.10.1  # https://github.com/just-the-docs/just-the-docs/releases/tag/v0.10.1
+
+# Collections & defaults
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+# Inclusions & exclusions
+include:
+  - ".well-known"
+exclude:
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - node_modules/
+  - vendor/
+
+# Just‑the‑Docs theme settings
+enable_copy_code_button: true     # show “copy” icons on code blocks
+search_enabled: false             # disable Lunr search
+heading_anchors: true             # show ¶ links on headings
+color_scheme: light               # force light mode
+nav_enabled: false                # turn off global sidebar
+back_to_top: false                # suppress “back to top” link
+
+# Custom CSS colours
+callouts_level: quiet             # softer styling for dark bg 
+callouts:
+  highlight:
+    color: yellow
+  important:
+    title: Important
+    color: blue
+  new:
+    title: New
+    color: green
+  note:
+    title: Note
+    color: purple
+  warning:
+    title: Warning
+    color: red
+
+# Markdown & syntax highlighting
+kramdown:
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false         # Disable line numbers everywhere
+
+# HTML compression
+compress_html:
+  clippings: all
+  comments: all
+  endings: all
+  blanklines: false
+
+# Disable footer
+footer_content: ""                # Hide just-the-docs URL
+last_edit_timestamp: false        # Hide "last edited" line
+gh_edit_link: false               # Hide "edit on GitHub" link
+
+# Liquid build safety checks
+liquid:
+  error_mode: strict               # fail on any Liquid error
+  strict_filters: true             # fail on unknown filters
+
+# Local environment options
+incremental: true
