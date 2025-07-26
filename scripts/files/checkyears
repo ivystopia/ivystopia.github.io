@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Determine whether the given two calendar years are equivalent.
 # For example, 2014 and 2025 have all the same days (Wednesday, 1st January, etc.)
