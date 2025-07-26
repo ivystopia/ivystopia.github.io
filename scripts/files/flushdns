@@ -38,7 +38,7 @@ PUBLIC_DNS_SERVERS = [
     "94.140.14.14",  # AdGuard DNS
     "76.76.2.0",  # Control D DNS
     "64.6.64.6",  # Verisign Public DNS
-    "198.41.0.4",  # The rest are root DNS servers from: curl https://www.internic.net/domain/named.root | grep "A    " | awk '{print $4}'
+    "198.41.0.4",  # Root DNS servers from: curl https://www.internic.net/domain/named.root | grep "A    " | awk '{print $4}'
     "170.247.170.2",
     "192.33.4.12",
     "199.7.91.13",

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
-# Deduplicate a directory of files based on their CRC32 hash
-# Usage: ./deduplicate_crc32 source_dir destination_dir
+"""Deduplicate files in a directory based on their CRC32 hash.
+
+Usage: ./deduplicate_crc32 source_dir destination_dir
+"""
 
 import os
 import zlib

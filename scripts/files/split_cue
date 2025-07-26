@@ -4,8 +4,6 @@
 A script to split CUE+FLAC into multiple FLACs.
 Run it on a directory that contains a single cuesheet and a single FLAC.
 It works on one directory at a time!
-Sorry I lost the script to print out a list of target directories.
-Go ask ChatGPT.
 
 Usage: script.py <directory>
 

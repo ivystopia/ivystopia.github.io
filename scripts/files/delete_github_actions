@@ -1,3 +1,7 @@
+# Deletes 'pages build and deployment' workflow runs for a repository.
+#
+# Usage: ./delete_github_actions
+# Environment: GITHUB_TOKEN must be set with permissions to manage runs.
 #!/bin/bash
 
 REPO_OWNER="ivystopia"
