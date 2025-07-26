@@ -11,7 +11,6 @@
 # Example:
 #   ./delete_glacier_vault.sh Music
 
-# TODO: Further enhance script to accept additional parameters like REGION and ACCOUNT_ID if needed.
 
 # Exit immediately if a command exits with a non-zero status
 set -e

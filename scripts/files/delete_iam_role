@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 
-# Fully delete an IAM role, even if it has attached policies
+"""Fully delete an IAM role, including attached policies and profiles.
 
-# inline policies are deleted
-# managed policies are detached
-# and the role is removed from all instance profiles
-
-# Usage: ./delete_iam_role role_name
+Usage: ./delete_iam_role role_name
+"""
 
 import sys
 import boto3

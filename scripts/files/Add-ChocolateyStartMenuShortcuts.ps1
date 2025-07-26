@@ -1,3 +1,8 @@
+# Creates Start Menu shortcuts for installed Chocolatey packages.
+# Usage:
+#   ./Add-ChocolateyStartMenuShortcuts.ps1 [-Force]
+#   -Force : recreate existing shortcuts even if they exist
+
 param(
     [switch]$Force  # Optional: if set, recreate existing shortcuts even if they exist
 )
