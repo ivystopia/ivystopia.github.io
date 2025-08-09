@@ -1,0 +1,160 @@
+#!/usr/bin/env zsh
+#
+# Automates system maintenance on Raspberry Pi (Debian 12):
+#   1. Update root.hints and Pi-hole
+#   2. Upgrade APT packages
+#   3. Refresh tldr and mlocate DBs
+#   4. Remove orphans, vacuum journal
+#   5. Update Oh-My-Zsh
+#   6. Rotate old /tmp upgrade logs
+
+sudo true
+set -euo pipefail
+setopt MULTIOS
+trap 'error_exit "on line $LINENO"' ERR
+
+## ── Colours ───────────────────────────────────────────────────────────────
+typeset -r GREEN="\033[1;32m"
+typeset -r RED="\033[1;31m"
+typeset -r BLUE="\033[1;34m"
+typeset -r RESET="\033[0m"
+
+## ── Logging ───────────────────────────────────────────────────────────────
+LOG_FILE="/tmp/log-upgrade-$(date +%Y%m%d%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+[[ $EUID -eq 0 ]] && {
+    printf "${RED}Please run as a non-root user.${RESET}\n"
+    exit 1
+}
+
+## ── Helper functions ──────────────────────────────────────────────────────
+print_in_color() { printf "%b%s%b\n" "$1" "$2" "$RESET"; }
+print_separator() { printf '\n%*s\n' "${COLUMNS:-80}" '' | tr ' ' -; }
+error_exit() {
+    print_in_color "$RED" "Error: $1"
+    printf "See %s\n" "$LOG_FILE" >&2
+    exit 1
+}
+run_cmd() {
+    local cmd="$1"
+    local sep="${2:-true}"
+    print_in_color "$BLUE" "Running: $cmd"
+    eval "$cmd" || error_exit "Command failed: $cmd"
+    [[ $sep == true ]] && print_separator
+}
+ensure_command() { command -v "$1" &>/dev/null || error_exit "Required command '$1' is not installed."; }
+
+# Check required tools are installed
+verify_dependencies() {
+    print_in_color "$GREEN" "Verifying required commands..."
+    local cmds=(deborphan apt-get pip3 python3 git cargo tldr pihole updatedb)
+    for c in "${cmds[@]}"; do ensure_command "$c"; done
+    print_in_color "$GREEN" "All required commands are available."
+    print_separator
+}
+
+## ── Task functions ────────────────────────────────────────────────────────
+# Refresh root.hints and update Pi-hole
+upgrade_pihole() {
+    print_in_color "$GREEN" "Downloading latest root.hints..."
+    local hints_dir=/var/lib/unbound
+    local hints_file=$hints_dir/root.hints
+    run_cmd "sudo mkdir -p ${hints_dir}"
+    run_cmd "sudo wget -q -O ${hints_file} https://www.internic.net/domain/named.root"
+    local date_line
+    date_line=$(grep -i 'last update:' "${hints_file}" 2>/dev/null || true)
+    if [[ -n $date_line ]]; then
+        local date=${date_line##*last update: }
+        print_in_color "$GREEN" "root.hints updated: ${date}"
+    else
+        print_in_color "$GREEN" "root.hints updated."
+    fi
+    print_separator
+
+    print_in_color "$GREEN" "Updating Pi-hole..."
+    # Capture the output
+    local up_output
+    up_output=$(sudo pihole -up 2>&1 | tee /dev/tty)
+    print_in_color "$BLUE" "$up_output"
+    print_separator
+
+    # Check if gravity was updated during upgrade
+    if echo "$up_output" | grep -qi 'gravity.*update\|Re-running gravity\|gravity list was updated'; then
+        print_in_color "$GREEN" "Pi-hole already updated gravity lists during upgrade."
+    else
+        run_cmd "sudo pihole -g"
+    fi
+    print_in_color "$GREEN" "Pi-hole updated successfully."
+    print_separator
+}
+
+# Upgrade APT packages
+upgrade_apt_packages() {
+    print_in_color "$GREEN" "Upgrading APT packages..."
+    run_cmd "sudo apt-get install --fix-broken -y"
+    run_cmd "sudo apt-get full-upgrade -y"
+    run_cmd "sudo apt-get autoremove -y"
+    run_cmd "sudo apt-get autoclean"
+    run_cmd "sudo apt-get clean"
+}
+
+# Refresh tldr and mlocate databases
+update_databases() {
+    print_in_color "$GREEN" "Updating command databases..."
+    run_cmd "tldr --update"
+    run_cmd "sudo updatedb"
+    print_in_color "$GREEN" "Databases updated successfully."
+    print_separator
+}
+
+# Remove orphaned packages using deborphan
+remove_orphaned_packages() {
+    print_in_color "$GREEN" "Removing orphaned packages..."
+    local orphans
+    orphans=$(deborphan | tr '\n' ' ')
+    if [[ -n $orphans ]]; then
+        print_in_color "$BLUE" "Orphaned packages found:\n$orphans"
+        run_cmd "sudo apt-get purge -y $orphans"
+    else
+        print_in_color "$GREEN" "No orphaned packages to remove."
+        print_separator
+    fi
+}
+
+# Vacuum systemd journal to ≤100MB
+clean_journal_logs() {
+    print_in_color "$GREEN" "Cleaning journal logs..."
+    run_cmd "sudo journalctl --vacuum-size=100M"
+}
+
+# Upgrade Oh My Zsh framework
+upgrade_oh_my_zsh() {
+    print_in_color "$GREEN" "Updating Oh My Zsh…"
+    run_cmd "$HOME/.oh-my-zsh/tools/upgrade.sh"
+}
+
+# Remove old log files from /tmp
+clean_old_logs() {
+    print_in_color "$GREEN" "Cleaning old log files..."
+    run_cmd "sudo find /tmp -type f -name 'log-upgrade-*.log' -mtime +7 -delete"
+    print_separator
+}
+
+## ── Execution order ───────────────────────────────────────────────────────
+run_steps=(
+    upgrade_pihole
+    upgrade_apt_packages
+    update_databases
+    remove_orphaned_packages
+    clean_journal_logs
+    upgrade_oh_my_zsh
+)
+
+main() {
+    verify_dependencies
+    for step in "${run_steps[@]}"; do "$step"; done
+    print_in_color "$GREEN" "System update and cleanup complete!"
+    printf "Log file located at: %s\n" "$LOG_FILE"
+    clean_old_logs
+}
+main
