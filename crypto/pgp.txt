@@ -7,11 +7,11 @@ Hash: SHA512
 
 Preferred.
 
-    8ALKFB78ubo1ig4a6cofMPPybK4mpD7azigBpAQSTeDqGC2dx2j5TE5joEuMnq7zwYVP4o8z5EpcfCwe9a649tbL4uiEke4
+    84nZnMRLYVK6Hqi9a3RzPy2LUB5b8KPEbPMCVgj2kcw7KimUfU3AycsJWFYAaYk97xYjQCnoDXbM1MG8BP1N8A1wHSMpEcb
 
 ## Ethereum & EVM-Compatible Networks
 
-_(Ethereum Mainnet, Arbitrum One, Base, Optimism, BNB Smart Chain, Polygon PoS)_  
+_(Ethereum Mainnet, Arbitrum One, Base, Optimism, BNB Smart Chain, Polygon PoS)_
 For native tokens (ETH, BNB, POL) and ERC-20/BEP-20 tokens on the networks above.
 
     0x108E58E55cc4BFC1D15bfc3534cBE50D0D10e24f
@@ -28,7 +28,7 @@ On-chain transactions only (no Lightning Network).
 
 ## Solana (SOL)
 
-For SOL and SPL tokens only.  
+For SOL and SPL tokens only.
 **Preferred for receiving USDC.**
 
     CSWmiWuPkPoqFshafUMAWvLq5UiAqaqh1MKw3MxZmKdF
@@ -56,8 +56,8 @@ For ADA and native Cardano tokens.
     t1WxwE7RxHBkFrh4Zz2vURFeWAeQsVgf6w6
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQSN1WH6QKvW6c3NnHl4NhGp3x3r1wUCaBHnOwAKCRB4NhGp3x3r
-1+DBAP9Olj6EqHXRMqiuZA9TURILe2LjW5P8ZdWs5AlKkL/eswD/fa9eKWhj35IO
-3TvCBqXFGKriWANJJ4IOrcl78YAbhgU=
-=k4pP
+iHUEARYKAB0WIQTjLUz4jo69amB8UzjcgfzirzWRaAUCaNrZBgAKCRDcgfzirzWR
+aMv6AP4woRfR2k5G/q6Rqki9GW7Q1m9BqFzNnHMA1+KH/JtlPAEA4SsTvQeCaCjk
+VHND76OyZIRGD8jbZKv+FhorUUQJ3gM=
+=pPxB
 -----END PGP SIGNATURE-----
