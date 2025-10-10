@@ -1,0 +1,163 @@
+#!/usr/bin/env sh
+# md5rename: Recursively rename files to their md5 hash, preserving directories and extensions.
+
+set -eu
+LC_ALL=C
+
+dry_run=false
+quiet=false
+follow_symlinks=false
+
+print_usage() {
+  cat <<'USAGE'
+md5rename [options] [PATH]
+
+Renames every regular file under PATH (default ".") to "<md5>.<ext>" while keeping the same directory layout.
+Hidden files keep their leading dot; only the last extension segment is preserved.
+Directories and symlinks are not renamed.
+
+Options:
+  -n, --dry-run           Show planned operations without changing anything.
+  -q, --quiet             Suppress output.
+  -L, --follow-symlinks   Follow symlinks to files (uses 'find -L').
+      --version           Print version and exit.
+  -h, --help              Show this help.
+
+Colision Behavior:
+  If the computed target name exists, append "-1", "-2", ... until a free name is found.
+
+Exit codes:
+  0 success, 1 usage error, 2 aborted by user.
+USAGE
+}
+
+version() { printf 'md5rename %s\n' "2.0.0"; }
+die() { printf 'md5rename: %s\n' "$*" >&2; exit 1; }
+log() { "$quiet" && return 0; printf '%s\n' "$*"; }
+
+require_tool() {
+  command -v "$1" >/dev/null 2>&1 || die "required tool not found: $1"
+}
+
+# Parse args
+root="."
+while [ $# -gt 0 ]; do
+  case "${1:-}" in
+    -n|--dry-run) dry_run=true ;;
+    -q|--quiet) quiet=true ;;
+    -L|--follow-symlinks) follow_symlinks=true ;;
+    --version) version; exit 0 ;;
+    -h|--help) print_usage; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown option: $1" ;;
+    *) if [ "$root" = "." ]; then root="$1"; else die "too many arguments"; fi ;;
+  esac
+  shift
+done
+[ $# -gt 0 ] && die "too many arguments"
+[ -d "$root" ] || die "not a directory: $root"
+cd "$root"
+
+# Guard prompt: interactive reads from /dev/tty; non-interactive reads one line from stdin; default Yes on empty/EOF.
+printf 'This will recursively rename files under "%s" to their md5sum.\n' "$(pwd)"
+if [ -t 0 ]; then
+  while :; do
+    printf 'Proceed? [Y/n]: ' 1>&2
+    IFS= read -r reply </dev/tty || reply=
+    case "${reply:-Y}" in
+      [Yy]) break ;;
+      [Nn]) printf 'md5rename: aborted by user\n' >&2; exit 2 ;;
+      *)    printf 'Please answer Y or n.\n' 1>&2 ;;
+    esac
+  done
+else
+  IFS= read -r reply || reply=
+  case "${reply:-Y}" in
+    [Yy]) : ;;
+    [Nn]) printf 'md5rename: aborted by user\n' >&2; exit 2 ;;
+    *)    printf 'md5rename: expected Y or n on stdin\n' >&2; exit 1 ;;
+  esac
+fi
+
+# Requirements
+require_tool md5sum
+require_tool find
+require_tool awk
+require_tool mv
+require_tool dirname
+require_tool basename
+
+# Find options
+FIND_ARGS=
+if "$follow_symlinks"; then
+  FIND_ARGS="-L"
+fi
+
+# Process files
+# Note: POSIX sh cannot read NUL-delimited streams. Filenames containing newlines are not supported.
+find $FIND_ARGS . -type f -print | while IFS= read -r file; do
+  # Skip unreadable files
+  if [ ! -r "$file" ]; then
+    printf "%s\n" "md5rename: warning: unreadable file skipped: $file" >&2
+    continue
+  fi
+
+  # Compute md5
+  hash=$(md5sum "$file" | awk '{print $1}')
+
+  dir=$(dirname "$file")
+  base=$(basename "$file")
+
+  # Determine extension:
+  #   "name.ext" -> "ext"
+  #   "name.tar.gz" -> "gz"
+  #   ".bashrc" -> ""    (no extension)
+  #   ".config.json" -> "json"
+  case "$base" in
+    .*.*) ext=${base##*.} ;;
+    .*)   ext= ;;
+    *.*)  ext=${base##*.} ;;
+    *)    ext= ;;
+  esac
+
+  if [ -n "$ext" ]; then
+    newname="$hash.$ext"
+  else
+    newname="$hash"
+  fi
+
+  target="$dir/$newname"
+
+  # Idempotence
+  if [ "$file" = "$target" ]; then
+    [ "$quiet" = true ] || printf "Already named: %s\n" "$file"
+    continue
+  fi
+
+  # Collision handling: always suffix -1, -2, ... if target exists
+  if [ -e "$target" ]; then
+    case "$newname" in *.*) base_noext=${newname%.*} ;; *) base_noext=$newname ;; esac
+    i=1
+    while :; do
+      if [ -n "$ext" ]; then
+        candidate="$dir/$base_noext-$i.$ext"
+      else
+        candidate="$dir/$hash-$i"
+      fi
+      if [ ! -e "$candidate" ]; then
+        target="$candidate"
+        break
+      fi
+      i=$((i+1))
+    done
+  fi
+
+  if [ "$dry_run" = true ]; then
+    [ "$quiet" = true ] || printf "RENAME: %s -> %s\n" "$file" "$target"
+  else
+    mv -- "$file" "$target"
+    [ "$quiet" = true ] || printf "Renamed: %s -> %s\n" "$file" "$target"
+  fi
+done
+
+[ "$dry_run" = true ] && log "Dry run complete. No changes made."
