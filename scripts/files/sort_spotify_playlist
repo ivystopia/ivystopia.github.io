@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""
+Sort a Spotify playlist by Title (A→Z), then by primary Artist (A→Z).
+
+Requirements:
+  pip install spotipy
+
+Auth env:
+  export SPOTIFY_CLIENT_ID=...
+  export SPOTIFY_CLIENT_SECRET=...
+  # optional; must exactly match an entry in your Spotify app's Redirect URIs
+  export SPOTIPY_REDIRECT_URI=http://127.0.0.1:9090/callback
+
+Usage:
+  ./sort_spotify_playlist --playlist <playlist_id_or_url> [--apply | --dry-run] [--redirect-uri URI]
+"""
+import argparse
+import os
+import sys
+import time
+from typing import List, Tuple, Dict, Any
+
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from spotipy.exceptions import SpotifyException, SpotifyOauthError
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Sort a Spotify playlist by Title, then Artist."
+    )
+    p.add_argument("--playlist", required=True, help="Spotify playlist ID or URL")
+    p.add_argument(
+        "--apply", action="store_true", help="Apply changes to reorder the playlist"
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print full new order and don't modify playlist",
+    )
+    p.add_argument(
+        "--redirect-uri",
+        help="Override redirect URI (must be whitelisted in your Spotify app)",
+    )
+    return p.parse_args()
+
+
+def extract_playlist_id(url_or_uri: str) -> str:
+    s = url_or_uri.strip()
+    if s.startswith("http"):
+        return s.split("/playlist/")[-1].split("?")[0]
+    if s.startswith("spotify:playlist:"):
+        return s.split(":")[-1]
+    return s
+
+
+def auth_client(redirect_uri: str) -> spotipy.Spotify:
+    client_id = os.getenv("SPOTIFY_CLIENT_ID")
+    client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        print(
+            "Error: SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    scope = "playlist-read-private playlist-modify-private playlist-modify-public"
+    print(f"Using redirect URI: {redirect_uri}")
+
+    try:
+        auth = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope=scope,
+            open_browser=True,
+            cache_path=os.path.expanduser("~/.cache_spotify_sorter"),
+            requests_timeout=30,
+        )
+        return spotipy.Spotify(auth_manager=auth)
+    except SpotifyOauthError as e:
+        msg = str(e)
+        if (
+            "INVALID_CLIENT: Invalid redirect URI" in msg
+            or "redirect_uri" in msg.lower()
+        ):
+            print(
+                "OAuth failed: the redirect URI must exactly match one in your Spotify app settings.\n"
+                f"Add this URI and retry: {redirect_uri}",
+                file=sys.stderr,
+            )
+        raise
+
+
+def fetch_all_items(sp: spotipy.Spotify, playlist_id: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    limit = 100
+    offset = 0
+    while True:
+        page = sp.playlist_items(
+            playlist_id, offset=offset, limit=limit, additional_types=("track",)
+        )
+        page_items = page.get("items") or []
+        items.extend(page_items)
+        if page.get("next"):
+            offset += limit
+        else:
+            break
+    return items
+
+
+def normalize(s: str) -> str:
+    return (s or "").strip().casefold()
+
+
+def playlist_identity(items: List[Dict[str, Any]]) -> List[Tuple[str, int]]:
+    ident: List[Tuple[str, int]] = []
+    for idx, it in enumerate(items):
+        track_obj = it.get("track") if isinstance(it, dict) else None
+        key: str
+        if not isinstance(track_obj, dict) or not track_obj:
+            key = f"unknown::{idx}"
+        elif track_obj.get("is_local"):
+            artists_val = track_obj.get("artists") or []
+            artist_names: List[str] = []
+            for artist_obj in artists_val:
+                if isinstance(artist_obj, dict):
+                    artist_names.append(str(artist_obj.get("name") or ""))
+                else:
+                    artist_names.append("")
+            key = f"local::{normalize(str(track_obj.get('name') or ''))}::{normalize(','.join(artist_names))}"
+        else:
+            uri = track_obj.get("uri")
+            key = str(uri) if uri else f"unknown::{idx}"
+        ident.append((key, idx))
+    return ident
+
+
+def sort_key_for_item(it: Dict[str, Any], orig_index: int) -> Tuple[str, str, int]:
+    track_obj = it.get("track") if isinstance(it, dict) else None
+    title = ""
+    artist0 = ""
+    if isinstance(track_obj, dict) and track_obj:
+        title = normalize(str(track_obj.get("name") or ""))
+        artists_val = track_obj.get("artists") or []
+        if artists_val and isinstance(artists_val[0], dict):
+            artist0 = normalize(str(artists_val[0].get("name") or ""))
+    return title, artist0, orig_index
+
+
+def build_target_order(items: List[Dict[str, Any]]) -> List[Tuple[str, int]]:
+    decorated: List[Tuple[Tuple[str, str, int], int]] = []
+    for idx, it in enumerate(items):
+        decorated.append((sort_key_for_item(it, idx), idx))
+    decorated.sort(key=lambda x: x[0])
+    idents = playlist_identity(items)
+    idx_to_ident: Dict[int, Tuple[str, int]] = {
+        orig_idx: (ident_key, orig_idx) for (ident_key, orig_idx) in idents
+    }
+    target: List[Tuple[str, int]] = []
+    for _key_tuple, orig_idx in decorated:
+        target.append(idx_to_ident.get(orig_idx, (f"unknown::{orig_idx}", orig_idx)))
+    return target
+
+
+def simulate_moves(
+    current: List[Tuple[str, int]], target: List[Tuple[str, int]]
+) -> List[Tuple[int, int]]:
+    moves: List[Tuple[int, int]] = []
+    cur = list(current)
+    for i in range(len(cur)):
+        if cur[i] == target[i]:
+            continue
+        try:
+            j = cur.index(target[i])
+        except ValueError:
+            continue
+        moves.append((j, i))
+        elem = cur.pop(j)
+        cur.insert(i, elem)
+    return moves
+
+
+def apply_moves(sp: spotipy.Spotify, playlist_id: str, moves: List[Tuple[int, int]]):
+    snapshot_id = None
+    for range_start, insert_before in moves:
+        while True:
+            try:
+                resp = sp.playlist_reorder_items(
+                    playlist_id=playlist_id,
+                    range_start=range_start,
+                    insert_before=insert_before,
+                    range_length=1,
+                    snapshot_id=snapshot_id,
+                )
+                if isinstance(resp, dict):
+                    snapshot_id = resp.get("snapshot_id", snapshot_id)
+                break
+            except SpotifyException as e:
+                if getattr(e, "http_status", None) == 429:
+                    retry_after = int(getattr(e, "headers", {}).get("Retry-After", "2"))
+                    time.sleep(retry_after + 1)
+                    continue
+                raise
+        time.sleep(0.2)
+
+
+def item_label(it: Dict[str, Any]) -> str:
+    track_obj = it.get("track") if isinstance(it, dict) else None
+    title = ""
+    artist0 = ""
+    if isinstance(track_obj, dict) and track_obj:
+        title = str(track_obj.get("name") or "")
+        artists_val = track_obj.get("artists") or []
+        if artists_val and isinstance(artists_val[0], dict):
+            artist0 = str(artists_val[0].get("name") or "")
+    return f"{title} - {artist0}"
+
+
+def main():
+    args = parse_args()
+    if args.apply and args.dry_run:
+        print("Error: --apply and --dry-run are mutually exclusive.", file=sys.stderr)
+        sys.exit(2)
+
+    redirect_uri = args.redirect_uri or os.getenv(
+        "SPOTIPY_REDIRECT_URI", "http://127.0.0.1:9090/callback"
+    )
+    playlist_id = extract_playlist_id(args.playlist)
+
+    try:
+        sp = auth_client(redirect_uri)
+    except SpotifyOauthError as e:
+        print(f"OAuth error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    items = fetch_all_items(sp, playlist_id)
+    if not items:
+        print("Playlist has no items.")
+        return
+
+    current = playlist_identity(items)
+    target = build_target_order(items)
+
+    print("Current first 10:")
+    for it in items[:10]:
+        print("  ", item_label(it))
+
+    target_indices = [orig_idx for (_key, orig_idx) in target]
+    preview_sorted = [items[i] for i in target_indices]
+    print("\nTarget first 10:")
+    for it in preview_sorted[:10]:
+        print("  ", item_label(it))
+
+    if args.dry_run:
+        print("\nFull new order (dry-run):")
+        for new_pos, orig_idx in enumerate(target_indices, start=1):
+            print(f"{new_pos:4d}. {item_label(items[orig_idx])}")
+        print("\nDry run. No changes applied.")
+        return
+
+    moves = simulate_moves(current, target)
+    print(f"\nPlanned single-item moves: {len(moves)}")
+    if not args.apply:
+        print(
+            "No changes applied. Use --apply to reorder, or --dry-run to print full new order."
+        )
+        return
+
+    if moves:
+        print("Applying reorder...")
+        apply_moves(sp, playlist_id, moves)
+        print("Done.")
+    else:
+        print("Already in desired order.")
+
+
+if __name__ == "__main__":
+    main()
