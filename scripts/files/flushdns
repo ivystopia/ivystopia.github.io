@@ -14,11 +14,14 @@ Example:
     python dns_propagation_checker.py example.com example.net
 """
 
+import importlib
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import List
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import dns.resolver
+
+dns_resolver = importlib.import_module("dns.resolver")
+dns_exception = importlib.import_module("dns.exception")
 
 # ANSI color codes for formatting output
 RESET = "\033[0m"
@@ -71,7 +74,7 @@ def dns_query(domain: str, dns_server: str, record_type: str) -> DNSQueryResult:
     """
     Perform a DNS query for a specific record type using dnspython.
     """
-    resolver = dns.resolver.Resolver()
+    resolver = dns_resolver.Resolver()
     resolver.nameservers = [dns_server]
     resolver.timeout = 3
     resolver.lifetime = 5
@@ -83,22 +86,22 @@ def dns_query(domain: str, dns_server: str, record_type: str) -> DNSQueryResult:
             f"{GREEN}SUCCESS{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10}"
         )
         return DNSQueryResult(domain, dns_server, record_type, "Success", output)
-    except dns.resolver.NoAnswer:
+    except dns_resolver.NoAnswer:
         print(
             f"{YELLOW}WARNING{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | No answer found"
         )
         return DNSQueryResult(domain, dns_server, record_type, "Failure", "No answer")
-    except dns.resolver.NXDOMAIN:
+    except dns_resolver.NXDOMAIN:
         print(
             f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | Domain does not exist"
         )
         return DNSQueryResult(domain, dns_server, record_type, "Failure", "NXDOMAIN")
-    except dns.resolver.Timeout:
+    except dns_resolver.Timeout:
         print(
             f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | Query timed out"
         )
         return DNSQueryResult(domain, dns_server, record_type, "Failure", "Timeout")
-    except dns.exception.DNSException as e:
+    except dns_exception.DNSException as e:
         short_error = str(e).split(":")[-1].strip()
         print(
             f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | {short_error}"
@@ -112,7 +115,7 @@ def run_dns_queries(
     """
     Run DNS queries concurrently for each domain against each DNS server and record type.
     """
-    results = []
+    results: List[DNSQueryResult] = []
     total_queries = len(domains) * len(dns_servers) * len(RECORD_TYPES)
     completed_queries = 0
 
@@ -168,9 +171,11 @@ def print_summary(results: List[DNSQueryResult]) -> None:
             if result.status == "Success"
             else (YELLOW if result.status == "No answer" else RED)
         )
-        print(
-            f"{result.domain:<25} | {result.dns_server:<15} | {result.record_type:<10} | {status_color}{result.status:<7}{RESET}"
+        summary_line = (
+            f"{result.domain:<25} | {result.dns_server:<15} | "
+            f"{result.record_type:<10} | {status_color}{result.status:<7}{RESET}"
         )
+        print(summary_line)
 
 
 def main():
