@@ -4,3 +4,5 @@ _site/
 # Ignore Jekyll cache and metadata files
 .jekyll-cache/
 .jekyll-metadata
+
+__pycache__/
