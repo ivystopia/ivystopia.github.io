@@ -5,9 +5,13 @@
 Usage: ./delete_iam_role role_name
 """
 
-import sys
-import boto3
+import importlib
 import os
+import sys
+from types import ModuleType
+from typing import cast
+
+boto3 = cast(ModuleType, importlib.import_module("boto3"))
 
 
 # Delete all inline policies attached to the given role
@@ -52,7 +56,7 @@ aws_profile = os.environ.get("AWS_PROFILE")
 
 # Make sure the user is deleting the role they intended to
 print()
-print("AWS_PROFILE = " + os.environ.get("AWS_PROFILE"))
+print("AWS_PROFILE = " + (aws_profile or "Not Set"))
 print("Account ID  = " + account_id)
 print("IAM role    = " + role_name)
 print()
