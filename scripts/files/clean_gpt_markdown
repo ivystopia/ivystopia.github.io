@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+clean_gpt_markdown
+
+Removes garbage characters and formatting from Markdown files produced by the "ChatGPT Exporter" userscript
+<https://greasyfork.org/en/scripts/456055-chatgpt-exporter>
+
+Usage:
+    strip_gpt_markdown input_file.md
+
+Writes the cleaned file to stdout:
+- Removes `[Unsupported Content]`
+- Removing citation artifacts.
+- Trims trailing spaces and tabs
+- Removes multiple blank lines
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+
+# REGULAR EXPRESSIONS
+
+# Citation tokens use private-use markers (U+E200 … U+E201 with optional U+E202 chunks).
+CITATION_RE = re.compile(r"\uE200cite(?:\uE202[^\r\n]*)*\uE201", re.IGNORECASE)
+
+# Fenced code markers. Open or close with ≥3 backticks or ≥3 tildes.
+FENCE_RE = re.compile(r"^\s*([`~]{3,})(.*)$")
+
+# “ChatGPT” section heading. We only remove it if its body is just an "Unsupported Content" stub.
+CHATGPT_HEADER_RE = re.compile(r"^\s*####\s*ChatGPT:\s*$", re.IGNORECASE)
+
+# Lines that equal “[Unsupported Content]” or the escaped form.
+UNSUPPORTED_LINE_RE = re.compile(r"^\\?\[Unsupported Content]\s*$", re.IGNORECASE)
+
+
+# UTILITY HELPERS
+
+
+class FenceTracker:
+    """Keeps track of fenced code regions so text-cleaning steps can respect them"""
+
+    def __init__(self) -> None:
+        self.active = False
+        self.char: str | None = None
+        self.length = 0
+
+    def update(self, line_wo_nl: str) -> None:
+        m = FENCE_RE.match(line_wo_nl)
+        if not m:
+            return
+
+        marker = m.group(1)
+        ch = marker[0]
+        n = len(marker)
+
+        if not self.active:
+            # Open a new fence
+            self.active = True
+            self.char = ch
+            self.length = n
+        else:
+            # Close only if same character and long enough
+            if self.char == ch and n >= self.length:
+                self.active = False
+                self.char = None
+                self.length = 0
+
+
+def _skip_unsupported_stub_block(lines: list[str], start: int) -> int | None:
+    """Locate the end of an Unsupported Content stub after a ChatGPT header and return its index"""
+    idx = start
+    n = len(lines)
+
+    while idx < n and lines[idx].strip() == "":
+        idx += 1
+    if idx >= n or not UNSUPPORTED_LINE_RE.match(lines[idx].strip()):
+        return None
+
+    while idx < n and UNSUPPORTED_LINE_RE.match(lines[idx].strip()):
+        idx += 1
+
+    while idx < n and lines[idx].strip() == "":
+        idx += 1
+
+    return idx
+
+
+# CLEANING STEPS
+
+
+def remove_unsupported_chatgpt_stubs(lines: list[str]) -> list[str]:
+    """Strip ChatGPT sections that only contain Unsupported Content stubs (outside fences)"""
+    out: list[str] = []
+    fence = FenceTracker()
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+        no_nl = line.rstrip("\r\n")
+
+        # Only consider removal outside fences.
+        if fence.active:
+            fence.update(no_nl)
+            out.append(line)
+            i += 1
+            continue
+
+        if CHATGPT_HEADER_RE.match(no_nl):
+            after_stub = _skip_unsupported_stub_block(lines, i + 1)
+            if after_stub is not None:
+                i = after_stub  # Skip header..after_stub-1 entirely
+                continue
+
+        # Keep the line and move on
+        out.append(line)
+        fence.update(no_nl)
+        i += 1
+
+    return out
+
+
+def strip_citations_outside_fences(lines: list[str]) -> list[str]:
+    """Drop inline citation markers from prose while preserving content inside fences"""
+    out: list[str] = []
+    fence = FenceTracker()
+
+    for line in lines:
+        no_nl = line.rstrip("\r\n")
+        if fence.active:
+            out.append(line)
+        else:
+            out.append(CITATION_RE.sub("", line))
+        fence.update(no_nl)
+
+    return out
+
+
+def trim_trailing_whitespace(lines: list[str]) -> list[str]:
+    """Remove trailing spaces or tabs from each line while preserving newline style"""
+    trimmed: list[str] = []
+    for line in lines:
+        if line.endswith("\r\n"):
+            trimmed.append(line[:-2].rstrip(" \t") + "\r\n")
+        elif line.endswith("\n"):
+            trimmed.append(line[:-1].rstrip(" \t") + "\n")
+        else:
+            trimmed.append(line.rstrip(" \t"))
+    return trimmed
+
+
+def collapse_blank_lines_outside_fences(lines: list[str]) -> list[str]:
+    """Collapse consecutive blank lines to single blanks outside code fences"""
+    out: list[str] = []
+    fence = FenceTracker()
+    previous_was_blank = False
+
+    for line in lines:
+        no_nl = line.rstrip("\r\n")
+        if fence.active:
+            out.append(line)
+            # Reset blank-line tracking while inside fences
+            previous_was_blank = False
+            fence.update(no_nl)
+            continue
+
+        # Outside fences: collapse blanks
+        if line.strip() == "":
+            if not previous_was_blank:
+                out.append(line)
+                previous_was_blank = True
+        else:
+            out.append(line)
+            previous_was_blank = False
+
+        fence.update(no_nl)
+
+    return out
+
+
+def clean_markdown(text: str) -> str:
+    """Apply the full cleaning pipeline to raw Markdown text"""
+    lines = text.splitlines(keepends=True)
+    lines = remove_unsupported_chatgpt_stubs(lines)
+    lines = strip_citations_outside_fences(lines)
+    lines = trim_trailing_whitespace(lines)
+    lines = collapse_blank_lines_outside_fences(lines)
+    return "".join(lines)
+
+
+# ENTRYPOINT: PARSE COMMAND LINE ARGUMENTS
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        sys.stderr.write("Usage: strip_gpt_markdown input_file.md\n")
+        return 2
+
+    path = Path(argv[1])
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        sys.stderr.write(f"Error reading '{path}': {e}\n")
+        return 2
+
+    try:
+        cleaned = clean_markdown(content)
+    except Exception as e:
+        sys.stderr.write(f"Error processing '{path}': {e}\n")
+        return 3
+
+    try:
+        sys.stdout.write(cleaned)
+    except Exception as e:
+        sys.stderr.write(f"Error writing output: {e}\n")
+        return 4
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
