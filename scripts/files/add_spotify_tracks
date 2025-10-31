@@ -22,7 +22,7 @@ Example:
 import sys
 import os
 import argparse
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
@@ -34,7 +34,9 @@ def parse_arguments():
 
 
 def read_track_urls():
-    print("Please enter the track URLs (one per line), followed by an empty line to end input:")
+    print(
+        "Please enter the track URLs (one per line), followed by an empty line to end input:"
+    )
     tracks = []
     for line in sys.stdin:
         if line.strip() == "":
@@ -72,7 +74,9 @@ def main():
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        print("Error: Spotify credentials (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET) are required.")
+        print(
+            "Error: Spotify credentials (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET) are required."
+        )
         sys.exit(1)
 
     track_urls = read_track_urls()
@@ -89,7 +93,9 @@ def main():
     )
 
     existing_track_ids = get_playlist_track_ids(sp, playlist_id)
-    new_track_ids = [track_id for track_id in track_ids if track_id not in existing_track_ids]
+    new_track_ids = [
+        track_id for track_id in track_ids if track_id not in existing_track_ids
+    ]
 
     for track_id in track_ids:
         if track_id in existing_track_ids:
