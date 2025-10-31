@@ -1,0 +1,9 @@
+[tool.pyright]
+# Analyze only the scripts folder
+include = ["scripts/files"]
+
+# Type-checking mode: "off" | "basic" | "standard" | "strict"
+typeCheckingMode = "strict"
+
+# Language target used for stdlib types and inference
+pythonVersion = "3.12"
