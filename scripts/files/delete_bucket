@@ -5,30 +5,76 @@
 Usage: ./delete_bucket bucket_name
 """
 
-import sys
-import boto3
+import importlib
 import os
+import sys
+from types import ModuleType
+from typing import Protocol, TypedDict, cast
 
-try:
-    bucket_name = sys.argv[1]
-except IndexError:
-    print(f"Usage: {sys.argv[0]} bucket_name")
-    exit(1)
+boto3 = cast(ModuleType, importlib.import_module("boto3"))
 
-bucket_name = bucket_name.removeprefix("s3://")
-account_id = boto3.client("sts").get_caller_identity().get("Account")
 
-# Make sure the user is deleting the bucket they intended to
-print()
-print("AWS_PROFILE = " + os.environ.get("AWS_PROFILE", "Not Set"))
-print("Account ID  = " + account_id)
-print("Bucket      = s3://" + bucket_name)
-print()
-print("Press Enter to DELETE the above bucket and all its contents.")
-input("Press Ctrl-C to cancel.")
+class ObjectVersionBatch(Protocol):
+    def delete(self) -> object: ...
 
-# Carry out the actions
-bucket = boto3.resource("s3").Bucket(bucket_name)
-bucket.object_versions.all().delete()
-bucket.delete()
-print("All operations completed successfully")
+
+class ObjectVersionsCollection(Protocol):
+    def all(self) -> ObjectVersionBatch: ...
+
+
+class BucketResource(Protocol):
+    object_versions: ObjectVersionsCollection
+
+    def delete(self) -> object: ...
+
+
+class S3ServiceResource(Protocol):
+    def Bucket(self, bucket_name: str) -> BucketResource: ...
+
+
+class GetCallerIdentityResponse(TypedDict, total=False):
+    Account: str
+
+
+class STSClient(Protocol):
+    def get_caller_identity(self) -> GetCallerIdentityResponse: ...
+
+
+def require_argument() -> str:
+    try:
+        return sys.argv[1]
+    except IndexError as exc:
+        raise SystemExit(f"Usage: {sys.argv[0]} bucket_name") from exc
+
+
+def get_account_id(sts_client: STSClient) -> str:
+    return sts_client.get_caller_identity().get("Account") or "<unknown>"
+
+
+def confirm_deletion(bucket_name: str, account_id: str) -> None:
+    print()
+    print("AWS_PROFILE = " + os.environ.get("AWS_PROFILE", "Not Set"))
+    print("Account ID  = " + account_id)
+    print("Bucket      = s3://" + bucket_name)
+    print()
+    print("Press Enter to DELETE the above bucket and all its contents.")
+    input("Press Ctrl-C to cancel.")
+
+
+def main() -> None:
+    bucket_arg = require_argument()
+    bucket_name = bucket_arg.removeprefix("s3://")
+
+    sts_client = cast(STSClient, boto3.client("sts"))
+    account_id = get_account_id(sts_client)
+    confirm_deletion(bucket_name, account_id)
+
+    s3_resource = cast(S3ServiceResource, boto3.resource("s3"))
+    bucket = s3_resource.Bucket(bucket_name)
+    bucket.object_versions.all().delete()
+    bucket.delete()
+    print("All operations completed successfully")
+
+
+if __name__ == "__main__":
+    main()
