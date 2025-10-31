@@ -8,14 +8,13 @@ Purpose:
     It queries each resolver for specific DNS record types using threading for improved performance.
 
 Usage:
-    python dns_propagation_checker.py <domain1> [domain2 ... domainN]
-
-Example:
-    python dns_propagation_checker.py example.com example.net
+    flushdns --types=A,NS,CNAME example.com example.net
+    flushdns --types=A example.org
+    flushdns example.net  # defaults to A records
 """
 
+import argparse
 import importlib
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import List
@@ -31,32 +30,55 @@ ORANGE = "\033[38;5;208m"
 CYAN = "\033[96m"
 RED = "\033[91m"
 
+DEFAULT_RECORD_TYPES = ["A"]
+
+
+@dataclass(frozen=True)
+class ResolverInfo:
+    address: str
+    description: str
+
+
 # Public DNS servers for querying
 PUBLIC_DNS_SERVERS = [
-    "8.8.8.8",  # Google Public DNS
-    "1.1.1.1",  # Cloudflare DNS
-    "9.9.9.9",  # Quad9
-    "208.67.222.222",  # OpenDNS
-    "185.228.168.168",  # CleanBrowsing Security
-    "94.140.14.14",  # AdGuard DNS
-    "76.76.2.0",  # Control D DNS
-    "64.6.64.6",  # Verisign Public DNS
-    "198.41.0.4",  # Root DNS servers from: curl https://www.internic.net/domain/named.root | grep "A    " | awk '{print $4}'
-    "170.247.170.2",
-    "192.33.4.12",
-    "199.7.91.13",
-    "192.203.230.10",
-    "192.5.5.241",
-    "192.112.36.4",
-    "198.97.190.53",
-    "192.36.148.17",
-    "192.58.128.30",
-    "193.0.14.129",
-    "199.7.83.42",
-    "202.12.27.33",
+    ResolverInfo("8.8.8.8", "Google Public DNS"),
+    ResolverInfo("8.8.4.4", "Google Public DNS"),
+    ResolverInfo("1.1.1.1", "Cloudflare DNS"),
+    ResolverInfo("1.0.0.1", "Cloudflare DNS"),
+    ResolverInfo("9.9.9.9", "Quad9"),
+    ResolverInfo("149.112.112.112", "Quad9"),
+    ResolverInfo("208.67.222.222", "OpenDNS (Cisco Umbrella)"),
+    ResolverInfo("208.67.220.220", "OpenDNS (Cisco Umbrella)"),
+    ResolverInfo("94.140.14.14", "AdGuard DNS"),
+    ResolverInfo("94.140.15.15", "AdGuard DNS"),
+    ResolverInfo("94.140.14.140", "AdGuard DNS (Non-filtering)"),
+    ResolverInfo("94.140.14.141", "AdGuard DNS (Non-filtering)"),
+    ResolverInfo("76.76.2.0", "Control D Free"),
+    ResolverInfo("76.76.10.0", "Control D Free"),
+    ResolverInfo("64.6.64.6", "Vercara UltraDNS Public"),
+    ResolverInfo("64.6.65.6", "Vercara UltraDNS Public"),
+    ResolverInfo("156.154.70.2", "Vercara UltraDNS Threat Protection"),
+    ResolverInfo("156.154.71.2", "Vercara UltraDNS Threat Protection"),
+    ResolverInfo("185.222.222.222", "DNS.SB"),
+    ResolverInfo("45.11.45.11", "DNS.SB"),
 ]
 
-RECORD_TYPES = ["A", "NS", "CNAME"]
+
+def parse_record_types(raw_types: List[str]) -> List[str]:
+    """
+    Parse comma-separated record type arguments into a normalized list.
+    """
+    if not raw_types:
+        return DEFAULT_RECORD_TYPES.copy()
+
+    record_types: List[str] = []
+    for entry in raw_types:
+        for candidate in entry.split(","):
+            normalized = candidate.strip().upper()
+            if normalized and normalized not in record_types:
+                record_types.append(normalized)
+
+    return record_types or DEFAULT_RECORD_TYPES.copy()
 
 
 @dataclass
@@ -65,17 +87,18 @@ class DNSQueryResult:
 
     domain: str
     dns_server: str
+    description: str
     record_type: str
     status: str
     output: str
 
 
-def dns_query(domain: str, dns_server: str, record_type: str) -> DNSQueryResult:
+def dns_query(domain: str, resolver_info: ResolverInfo, record_type: str) -> DNSQueryResult:
     """
     Perform a DNS query for a specific record type using dnspython.
     """
     resolver = dns_resolver.Resolver()
-    resolver.nameservers = [dns_server]
+    resolver.nameservers = [resolver_info.address]
     resolver.timeout = 3
     resolver.lifetime = 5
 
@@ -83,40 +106,78 @@ def dns_query(domain: str, dns_server: str, record_type: str) -> DNSQueryResult:
         answers = resolver.resolve(domain, record_type)
         output = "\n".join(str(answer) for answer in answers)
         print(
-            f"{GREEN}SUCCESS{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10}"
+            f"{GREEN}SUCCESS{RESET}: {domain:<25} | {resolver_info.address:<15} | {record_type:<10}"
         )
-        return DNSQueryResult(domain, dns_server, record_type, "Success", output)
+        return DNSQueryResult(
+            domain,
+            resolver_info.address,
+            resolver_info.description,
+            record_type,
+            "Success",
+            output,
+        )
     except dns_resolver.NoAnswer:
         print(
-            f"{YELLOW}WARNING{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | No answer found"
+            f"{YELLOW}WARNING{RESET}: {domain:<25} | {resolver_info.address:<15} | {record_type:<10} | No answer found"
         )
-        return DNSQueryResult(domain, dns_server, record_type, "Failure", "No answer")
+        return DNSQueryResult(
+            domain,
+            resolver_info.address,
+            resolver_info.description,
+            record_type,
+            "Failure",
+            "No answer",
+        )
     except dns_resolver.NXDOMAIN:
         print(
-            f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | Domain does not exist"
+            f"{RED}ERROR{RESET}: {domain:<25} | {resolver_info.address:<15} | {record_type:<10} | Domain does not exist"
         )
-        return DNSQueryResult(domain, dns_server, record_type, "Failure", "NXDOMAIN")
+        return DNSQueryResult(
+            domain,
+            resolver_info.address,
+            resolver_info.description,
+            record_type,
+            "Failure",
+            "NXDOMAIN",
+        )
     except dns_resolver.Timeout:
         print(
-            f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | Query timed out"
+            f"{RED}ERROR{RESET}: {domain:<25} | {resolver_info.address:<15} | {record_type:<10} | Query timed out"
         )
-        return DNSQueryResult(domain, dns_server, record_type, "Failure", "Timeout")
+        return DNSQueryResult(
+            domain,
+            resolver_info.address,
+            resolver_info.description,
+            record_type,
+            "Failure",
+            "Timeout",
+        )
     except dns_exception.DNSException as e:
         short_error = str(e).split(":")[-1].strip()
         print(
-            f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | {short_error}"
+            f"{RED}ERROR{RESET}: {domain:<25} | {resolver_info.address:<15} | {record_type:<10} | {short_error}"
         )
-        return DNSQueryResult(domain, dns_server, record_type, "Failure", short_error)
+        return DNSQueryResult(
+            domain,
+            resolver_info.address,
+            resolver_info.description,
+            record_type,
+            "Failure",
+            short_error,
+        )
 
 
 def run_dns_queries(
-    domains: List[str], dns_servers: List[str], max_workers: int = 10
+    domains: List[str],
+    resolvers: List[ResolverInfo],
+    record_types: List[str],
+    max_workers: int = 10,
 ) -> List[DNSQueryResult]:
     """
     Run DNS queries concurrently for each domain against each DNS server and record type.
     """
     results: List[DNSQueryResult] = []
-    total_queries = len(domains) * len(dns_servers) * len(RECORD_TYPES)
+    total_queries = len(domains) * len(resolvers) * len(record_types)
     completed_queries = 0
 
     print(
@@ -125,14 +186,14 @@ def run_dns_queries(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_query = {
-            executor.submit(dns_query, domain, dns_server, record_type): (
+            executor.submit(dns_query, domain, resolver, record_type): (
                 domain,
-                dns_server,
+                resolver,
                 record_type,
             )
             for domain in domains
-            for dns_server in dns_servers
-            for record_type in RECORD_TYPES
+            for resolver in resolvers
+            for record_type in record_types
         }
 
         for future in as_completed(future_to_query):
@@ -140,9 +201,9 @@ def run_dns_queries(
                 result = future.result()
                 results.append(result)
             except Exception as e:
-                domain, dns_server, record_type = future_to_query[future]
+                domain, resolver, record_type = future_to_query[future]
                 print(
-                    f"{RED}ERROR{RESET}: {domain:<25} | {dns_server:<15} | {record_type:<10} | Exception: {str(e)}"
+                    f"{RED}ERROR{RESET}: {domain:<25} | {resolver.address:<15} | {record_type:<10} | Exception: {str(e)}"
                 )
             finally:
                 completed_queries += 1
@@ -159,8 +220,26 @@ def print_summary(results: List[DNSQueryResult]) -> None:
     """
     Print a summary table of the DNS query results.
     """
-    header = (
-        f"{'Domain':<25} | {'DNS Server':<15} | {'Record Type':<10} | {'Status':<7}"
+    headers = ["Domain", "DNS Server", "Description", "Record Type", "Status"]
+    rows: List[List[str]] = [
+        [
+            result.domain,
+            result.dns_server,
+            result.description,
+            result.record_type,
+            result.status,
+        ]
+        for result in results
+    ]
+
+    column_values = [headers] + rows
+    widths = [
+        max(len(value) for value in (column[idx] for column in column_values)) + 1
+        for idx in range(len(headers))
+    ]
+
+    header = " | ".join(
+        f"{headers[idx]:<{widths[idx]}}" for idx in range(len(headers))
     )
     print(f"\n{CYAN}Summary Table:{RESET}")
     print(header)
@@ -171,20 +250,45 @@ def print_summary(results: List[DNSQueryResult]) -> None:
             if result.status == "Success"
             else (YELLOW if result.status == "No answer" else RED)
         )
-        summary_line = (
-            f"{result.domain:<25} | {result.dns_server:<15} | "
-            f"{result.record_type:<10} | {status_color}{result.status:<7}{RESET}"
-        )
+        row = [
+            result.domain,
+            result.dns_server,
+            result.description,
+            result.record_type,
+            result.status,
+        ]
+        formatted_values: List[str] = []
+        for idx, value in enumerate(row):
+            formatted = f"{value:<{widths[idx]}}"
+            if idx == 4:
+                formatted = f"{status_color}{formatted}{RESET}"
+            formatted_values.append(formatted)
+
+        summary_line = " | ".join(formatted_values)
         print(summary_line)
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"{RED}Error:{RESET} Usage: ./flushdns <domain1> [domain2 ... domainN]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Check DNS propagation across multiple public resolvers."
+    )
+    parser.add_argument(
+        "-t",
+        "--types",
+        action="append",
+        help="Comma-separated DNS record types to query (can be provided multiple times).",
+        default=[],
+    )
+    parser.add_argument(
+        "domains",
+        nargs="+",
+        help="One or more domain names to query.",
+    )
 
-    domains = sys.argv[1:]
-    results = run_dns_queries(domains, PUBLIC_DNS_SERVERS)
+    args = parser.parse_args()
+    record_types = parse_record_types(args.types)
+
+    results = run_dns_queries(args.domains, PUBLIC_DNS_SERVERS, record_types)
     print_summary(results)
 
 
