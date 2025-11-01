@@ -1,0 +1,187 @@
+#!/bin/sh
+# samefile - fast equality check for two paths
+# Exit codes:
+#   0 = files are the same
+#   1 = files are not the same
+#   2 = error (usage, missing file, permissions, etc.)
+
+set -u
+
+EXIT_SAME=0   # Files are identical
+EXIT_DIFF=1   # Files differ
+EXIT_ERR=2    # Script failed
+
+prog_name=${0##*/}
+
+# Print usage and exit with error code.
+usage() {
+  printf 'usage: %s [--verbose|-v] <path1> <path2>\n' "$prog_name" >&2
+  exit "$EXIT_ERR"
+}
+
+# Emit a message only when verbosity has been requested.
+say_verbose() {
+  [ "$verbose" -eq 1 ] && printf '%s\n' "$1" >&2
+}
+
+# Prefix an error with the program name so diagnostics stand out.
+report_error() {
+  printf '%s: %s\n' "$prog_name" "$1" >&2
+}
+
+# Dedicated helper so callers can clearly express the intent of checking for a
+# regular file.
+is_regular_file() {
+  [ -f "$1" ]
+}
+
+# Probe the most common file types, then fall back to basic access checks as a
+# last resort when detecting whether a path exists.
+path_exists() {
+  # First reuse the regular-file helper to avoid duplicating the test.
+  if is_regular_file "$1"; then
+    return 0
+  fi
+  # Directory entry.
+  [ -d "$1" ] && return 0
+  # Symbolic link.
+  [ -L "$1" ] && return 0
+  # Block device (e.g., disk).
+  [ -b "$1" ] && return 0
+  # Character device (e.g., terminal).
+  [ -c "$1" ] && return 0
+  # Named pipe.
+  [ -p "$1" ] && return 0
+  # Fallback: readable entry confirmed by permission bits.
+  [ -r "$1" ] && return 0
+  # Fallback: writable entry.
+  [ -w "$1" ] && return 0
+  # Fallback: executable entry.
+  [ -x "$1" ] && return 0
+  # Nothing matched, so signal failure.
+  return 1
+}
+
+# Exit early when a required path is missing.
+ensure_exists() {
+  if ! path_exists "$1"; then
+    if [ "$verbose" -eq 1 ]; then
+      report_error "error: $1 does not exist"
+    fi
+    exit "$EXIT_ERR"
+  fi
+}
+
+# Use `wc -c` to obtain an exact byte count for a regular file.
+get_file_size() {
+  file_size_bytes=$(wc -c < "$1") || return 1
+  printf '%s\n' "$(printf '%d' "$file_size_bytes")"
+}
+
+# Guard against filenames that begin with '-' so we can safely invoke `cmp`.
+cmp_operand() {
+  case $1 in
+    -*) printf './%s\n' "$1" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+verbose=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --verbose|-v)
+      # Toggle verbose diagnostics.
+      verbose=1
+      shift
+      ;;
+    --help|-h)
+      # Ask for help? Hand back the usage screen.
+      usage
+      ;;
+    --)
+      # Explicit end of options.
+      shift
+      break
+      ;;
+    -*)
+      # Anything else beginning with '-' is unknown at this point.
+      report_error "unknown option: $1"
+      usage
+      ;;
+    *)
+      # First non-option argument; stop parsing flags.
+      break
+      ;;
+  esac
+done
+
+[ "$#" -eq 2 ] || usage
+
+f1=$1   # First path provided by the caller
+f2=$2   # Second path to compare against
+
+# Catch obvious mistakes before doing any more work.
+ensure_exists "$f1"
+ensure_exists "$f2"
+
+if [ "$f1" -ef "$f2" ]; then
+  # Same inode means they are literally the same file.
+  say_verbose 'same: both paths refer to the same inode'
+  exit "$EXIT_SAME"
+fi
+
+if is_regular_file "$f1" && is_regular_file "$f2"; then
+  s1=$(get_file_size "$f1") || {
+    if [ "$verbose" -eq 1 ]; then
+      report_error "error: failed to read size for $f1"
+    fi
+    exit "$EXIT_ERR"
+  }
+  s2=$(get_file_size "$f2") || {
+    if [ "$verbose" -eq 1 ]; then
+      report_error "error: failed to read size for $f2"
+    fi
+    exit "$EXIT_ERR"
+  }
+
+  if [ "$s1" -ne "$s2" ]; then
+    # Different sizes mean no need to look at the contents.
+    say_verbose "different: sizes differ ($s1 vs $s2 bytes)"
+    exit "$EXIT_DIFF"
+  fi
+
+  if [ "$s1" -eq 0 ]; then
+    # At this point both are empty regular files.
+    say_verbose 'same: both files are empty'
+    exit "$EXIT_SAME"
+  fi
+fi
+
+# Prepare safe operands in case either path begins with '-'.
+c1=$(cmp_operand "$f1")
+c2=$(cmp_operand "$f2")
+
+if cmp -s "$c1" "$c2"; then
+  # Identical bytes from start to finish.
+  say_verbose 'same: byte-for-byte identical'
+  exit "$EXIT_SAME"
+else
+  ec=$?
+  case "$ec" in
+    0)
+      # `cmp` reported success; treat as identical.
+      say_verbose 'same: byte-for-byte identical'
+      exit "$EXIT_SAME"
+      ;;
+    1)
+      # `cmp` differences are signalled by exit status 1.
+      say_verbose 'different: contents differ'
+      exit "$EXIT_DIFF"
+      ;;
+    *)
+      # Any other status is an error propagated from `cmp`.
+      say_verbose "error: cmp failed (exit $ec)"
+      exit "$EXIT_ERR"
+      ;;
+  esac
+fi
