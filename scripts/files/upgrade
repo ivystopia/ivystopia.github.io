@@ -8,7 +8,7 @@
 #   5. Update Oh-My-Zsh
 #   6. Rotate old /tmp upgrade logs
 
-sudo true
+sudo -v
 set -euo pipefail
 setopt MULTIOS
 trap 'error_exit "on line $LINENO"' ERR
