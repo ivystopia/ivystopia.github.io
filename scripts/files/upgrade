@@ -98,9 +98,16 @@ upgrade_pip_packages() {
         pip_outdated+=("$pkg")
     done < <(jq -r '.[].name' <<<"$outdated_json")
 
-    if ((${#pip_outdated[@]})); then
-        run_cmd pip3 install --break-system-packages --upgrade --user "${pip_outdated[@]}"
+    if ((${#pip_outdated[@]} == 0)); then
+        print_in_color "$GREEN" "No outdated pip packages."
+        print_separator
+        return 0
     fi
+
+    for pkg in "${pip_outdated[@]}"; do
+        print_in_color "$GREEN" "Upgrading pip package: $pkg"
+        run_cmd pip3 install --break-system-packages --upgrade --user "$pkg"
+    done
 
     run_cmd pip3 cache purge
     print_in_color "$GREEN" "All pip packages are up-to-date."
