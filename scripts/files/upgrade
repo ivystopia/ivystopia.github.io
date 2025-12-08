@@ -73,7 +73,7 @@ upgrade_apt_packages() {
     print_in_color "$GREEN" "Upgrading APT packages..."
     run_cmd sudo apt-get update
     run_cmd sudo apt-get install --fix-broken -y
-    run_cmd sudo apt-get full-upgrade -y
+    run_cmd sudo apt full-upgrade -y
     run_cmd sudo apt-get autoremove -y
     run_cmd sudo apt-get autoclean
     run_cmd sudo apt-get clean
