@@ -7,48 +7,28 @@ Requires qBittorrent's Web UI to be enabled.
 
 import argparse
 import getpass
-import importlib
+import requests
 import sys
 from dataclasses import dataclass, replace
-from typing import Any, Dict, List, Mapping, Protocol, Sequence, cast
+from typing import Any, Dict, List, Mapping, Sequence, cast
 
-# Lightweight protocols keep strict type checking happy without pulling in stub packages.
+# Rely on requests' public API types to keep annotations accurate and Pylance happy.
 
-
-class ResponseProtocol(Protocol):
-    status_code: int
-    text: str
-
-    def json(self) -> Any:
-        ...
+# Fail fast when the Web UI port is closed, but allow a bit more time to read responses.
+CONNECT_TIMEOUT_SECONDS = 5.0
+READ_TIMEOUT_SECONDS = 30.0
+REQUEST_TIMEOUT = (CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS)
 
 
-class SessionProtocol(Protocol):
-    verify: bool
-
-    def post(self, url: str, data: Mapping[str, Any] | None = None) -> ResponseProtocol:
-        ...
-
-    def get(
-        self, url: str, params: Mapping[str, Any] | None = None
-    ) -> ResponseProtocol:
-        ...
+class ParsedArgs(argparse.Namespace):
+    # Explicit CLI arg types make Pylance happy and document the expected inputs.
+    url: str | None
+    user: str | None
+    ignore_invalid_ssl: bool
+    include_private_torrents: bool
 
 
-class RequestsExceptionsProtocol(Protocol):
-    ConnectionError: type[Exception]
-
-
-class RequestsModuleProtocol(Protocol):
-    exceptions: RequestsExceptionsProtocol
-
-    def Session(self) -> SessionProtocol:
-        ...
-
-
-requests = cast(RequestsModuleProtocol, importlib.import_module("requests"))
-
-
+# Bundle CLI-derived settings so functions don't pass a long list of parameters.
 @dataclass(frozen=True)
 class CLIConfig:
     qbittorrent_url: str
@@ -60,6 +40,74 @@ class CLIConfig:
 
 class AuthenticationRequiredError(RuntimeError):
     """Raised when qBittorrent requires authentication."""
+
+
+# Centralize qBittorrent API calls so URL construction and request handling are
+# documented in one place and the higher-level logic stays easy to read.
+@dataclass(frozen=True)
+class QbittorrentClient:
+    base_url: str
+    session: requests.Session
+    timeout: tuple[float, float]
+
+    def _get(
+        self, path: str, params: Mapping[str, Any] | None = None
+    ) -> requests.Response:
+        return self.session.get(
+            f"{self.base_url}{path}", params=params, timeout=self.timeout
+        )
+
+    def _post(
+        self, path: str, data: Mapping[str, Any] | None = None
+    ) -> requests.Response:
+        return self.session.post(
+            f"{self.base_url}{path}", data=data, timeout=self.timeout
+        )
+
+    def login(self, username: str, password: str) -> None:
+        # qBittorrent responds with HTTP 200 and body "Ok." on success.
+        response = self._post(
+            "/api/v2/auth/login", data={"username": username, "password": password}
+        )
+        ensure_success(
+            response,
+            "Login failed",
+            "Authentication failed. Please provide qBittorrent credentials.",
+        )
+        if response.text != "Ok.":
+            raise RuntimeError("Login failed: unexpected response from qBittorrent")
+
+    def torrents(self) -> List[Dict[str, Any]]:
+        response = self._get("/api/v2/torrents/info")
+        ensure_success(
+            response,
+            "Failed to fetch torrents",
+            "Authentication required to list torrents. Provide credentials.",
+        )
+        return cast(List[Dict[str, Any]], response.json())
+
+    def trackers(self, torrent_hash: str) -> List[Dict[str, Any]]:
+        response = self._get("/api/v2/torrents/trackers", params={"hash": torrent_hash})
+        ensure_success(
+            response,
+            f"Failed to fetch trackers for torrent hash {torrent_hash}",
+            "Authentication required to inspect trackers. Provide credentials.",
+        )
+        return cast(List[Dict[str, Any]], response.json())
+
+    def remove_tracker(
+        self, torrent_hash: str, tracker_url: str
+    ) -> requests.Response:
+        return self._post(
+            "/api/v2/torrents/removeTrackers",
+            data={"hash": torrent_hash, "urls": tracker_url},
+        )
+
+    def logout(self) -> None:
+        try:
+            self._post("/api/v2/auth/logout")
+        except Exception:  # pragma: no cover - best effort cleanup
+            pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,11 +160,12 @@ def prompt_for_credentials() -> CLIConfig:
 
 def derive_config(parser: argparse.ArgumentParser) -> CLIConfig:
     """Derive the execution configuration from CLI arguments or prompts."""
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=ParsedArgs())
     ignore_invalid_ssl = bool(args.ignore_invalid_ssl)
     ignore_private_torrents = not bool(args.include_private_torrents)
 
     if args.url and args.user:
+        # Password can be prompted later if the Web UI requires authentication.
         return CLIConfig(
             qbittorrent_url=args.url,
             username=args.user,
@@ -131,10 +180,8 @@ def derive_config(parser: argparse.ArgumentParser) -> CLIConfig:
         )
 
     config = prompt_for_credentials()
-    return CLIConfig(
-        qbittorrent_url=config.qbittorrent_url,
-        username=config.username,
-        password=config.password,
+    return replace(
+        config,
         ignore_invalid_ssl=ignore_invalid_ssl,
         ignore_private_torrents=ignore_private_torrents,
     )
@@ -149,17 +196,20 @@ def prompt_for_password(username: str) -> str:
     return getpass.getpass(prompt)
 
 
-def create_session(ignore_invalid_ssl: bool) -> SessionProtocol:
+def create_session(ignore_invalid_ssl: bool) -> requests.Session:
     """Create a configured requests session."""
-    session: SessionProtocol = requests.Session()
+    session = requests.Session()
     session.verify = not ignore_invalid_ssl
     return session
 
 
 def ensure_success(
-    response: ResponseProtocol, error_message: str, auth_error_message: str | None = None
+    response: requests.Response,
+    error_message: str,
+    auth_error_message: str | None = None,
 ) -> None:
     """Raise an error if the response indicates a failure."""
+    # qBittorrent uses 401/403 when authentication is required.
     if response.status_code in (401, 403):
         raise AuthenticationRequiredError(
             auth_error_message or "Authentication is required to access qBittorrent"
@@ -168,84 +218,35 @@ def ensure_success(
         raise RuntimeError(error_message)
 
 
-def login(session: SessionProtocol, config: CLIConfig) -> None:
-    """Authenticate with the qBittorrent Web UI."""
-    if config.password is None:
-        raise AuthenticationRequiredError(
-            "Password required to authenticate with qBittorrent"
-        )
-
-    login_payload = {"username": config.username, "password": config.password}
-    response = session.post(
-        f"{config.qbittorrent_url}/api/v2/auth/login", data=login_payload
-    )
-    ensure_success(
-        response,
-        "Login failed",
-        "Authentication failed. Please provide qBittorrent credentials.",
-    )
-    if response.text != "Ok.":
-        raise RuntimeError("Login failed: unexpected response from qBittorrent")
-
-
-def fetch_torrents(session: SessionProtocol, qbittorrent_url: str) -> List[Dict[str, Any]]:
-    """Retrieve all torrents from qBittorrent."""
-    response = session.get(f"{qbittorrent_url}/api/v2/torrents/info")
-    ensure_success(
-        response,
-        "Failed to fetch torrents",
-        "Authentication required to list torrents. Provide credentials.",
-    )
-    return cast(List[Dict[str, Any]], response.json())
-
-
-def fetch_trackers(
-    session: SessionProtocol, qbittorrent_url: str, torrent_hash: str
-) -> List[Dict[str, Any]]:
-    """Fetch trackers for a specific torrent."""
-    response = session.get(
-        f"{qbittorrent_url}/api/v2/torrents/trackers", params={"hash": torrent_hash}
-    )
-    ensure_success(
-        response,
-        f"Failed to fetch trackers for torrent hash {torrent_hash}",
-        "Authentication required to inspect trackers. Provide credentials.",
-    )
-    return cast(List[Dict[str, Any]], response.json())
-
-
 def tracker_is_not_working(tracker: Dict[str, Any]) -> bool:
     """Return True if a tracker is reported as not working."""
+    # qBittorrent reports tracker status=4 as "Not working".
     return int(tracker.get("status", 0)) == 4
 
 
-def remove_tracker(
-    session: SessionProtocol,
-    qbittorrent_url: str,
+def remove_tracker_from_torrent(
+    client: QbittorrentClient,
     torrent_hash: str,
     tracker_url: str,
     torrent_name: str,
 ) -> bool:
     """Remove a tracker from a torrent, retrying once if necessary."""
-    removal_payload = {"hash": torrent_hash, "urls": tracker_url}
-    response = session.post(
-        f"{qbittorrent_url}/api/v2/torrents/removeTrackers", data=removal_payload
-    )
+    response = client.remove_tracker(torrent_hash, tracker_url)
     if response.status_code != 200:
         print(f"Failed to remove tracker {tracker_url} from torrent {torrent_name}")
         return False
 
     try:
-        updated_trackers = fetch_trackers(session, qbittorrent_url, torrent_hash)
+        updated_trackers = client.trackers(torrent_hash)
     except RuntimeError:
         print(f"Failed to re-check trackers for torrent: {torrent_name}")
         return False
 
     if any(str(t.get("url", "")) == tracker_url for t in updated_trackers):
-        print(f"Tracker {tracker_url} still exists for torrent {torrent_name}, retrying...")
-        retry_response = session.post(
-            f"{qbittorrent_url}/api/v2/torrents/removeTrackers", data=removal_payload
+        print(
+            f"Tracker {tracker_url} still exists for torrent {torrent_name}, retrying..."
         )
+        retry_response = client.remove_tracker(torrent_hash, tracker_url)
         if retry_response.status_code != 200:
             print(f"Retry failed for tracker {tracker_url} on torrent {torrent_name}")
             return False
@@ -254,7 +255,7 @@ def remove_tracker(
 
 
 def process_torrents(
-    session: SessionProtocol, config: CLIConfig, torrents: Sequence[Dict[str, Any]]
+    client: QbittorrentClient, config: CLIConfig, torrents: Sequence[Dict[str, Any]]
 ) -> int:
     """Remove dead trackers from torrents and return the number of actions performed."""
     actions_performed = 0
@@ -267,11 +268,12 @@ def process_torrents(
             continue
 
         if config.ignore_private_torrents and bool(torrent.get("is_private", False)):
+            # Many private trackers disallow tampering with the tracker list.
             print(f"Skipping private torrent: {torrent_name}")
             continue
 
         try:
-            trackers = fetch_trackers(session, config.qbittorrent_url, torrent_hash)
+            trackers = client.trackers(torrent_hash)
         except AuthenticationRequiredError as exc:
             print(exc)
             raise
@@ -279,6 +281,7 @@ def process_torrents(
             print(exc)
             continue
 
+        # Only remove trackers qBittorrent already marked as non-working.
         non_working_trackers = [
             tracker for tracker in trackers if tracker_is_not_working(tracker)
         ]
@@ -289,19 +292,18 @@ def process_torrents(
                 continue
 
             print(f"Removing tracker {tracker_url} from torrent {torrent_name}")
-            if remove_tracker(
-                session, config.qbittorrent_url, torrent_hash, tracker_url, torrent_name
+            if remove_tracker_from_torrent(
+                client, torrent_hash, tracker_url, torrent_name
             ):
                 actions_performed += 1
     return actions_performed
 
 
-def logout(session: SessionProtocol, qbittorrent_url: str) -> None:
-    """Attempt to log out from the qBittorrent Web UI."""
-    try:
-        session.post(f"{qbittorrent_url}/api/v2/auth/logout")
-    except Exception:  # pragma: no cover - best effort cleanup
-        pass
+def login_with_prompt(client: QbittorrentClient, config: CLIConfig) -> CLIConfig:
+    password = prompt_for_password(config.username)
+    updated = replace(config, password=password)
+    client.login(updated.username, password)
+    return updated
 
 
 def main() -> None:
@@ -309,39 +311,57 @@ def main() -> None:
     parser = build_parser()
     config = derive_config(parser)
     session = create_session(config.ignore_invalid_ssl)
+    client = QbittorrentClient(config.qbittorrent_url, session, REQUEST_TIMEOUT)
 
     try:
         if config.password is not None:
-            login(session, config)
+            client.login(config.username, config.password)
 
         try:
-            torrents = fetch_torrents(session, config.qbittorrent_url)
+            torrents = client.torrents()
         except AuthenticationRequiredError:
             if config.password is not None:
                 raise
 
-            # Only now do we prompt: the Web UI asked for credentials.
-            password = prompt_for_password(config.username)
-            config = replace(config, password=password)
-            login(session, config)
-            torrents = fetch_torrents(session, config.qbittorrent_url)
+            # Defer password prompts until qBittorrent explicitly asks for auth.
+            config = login_with_prompt(client, config)
+            torrents = client.torrents()
 
         try:
-            actions_performed = process_torrents(session, config, torrents)
+            actions_performed = process_torrents(client, config, torrents)
         except AuthenticationRequiredError:
             if config.password is not None:
                 raise
 
-            # Authentication was required mid-run, so collect credentials and retry once.
-            password = prompt_for_password(config.username)
-            config = replace(config, password=password)
-            login(session, config)
-            torrents = fetch_torrents(session, config.qbittorrent_url)
-            actions_performed = process_torrents(session, config, torrents)
+            # If auth expires mid-run, prompt once more and retry the full pass.
+            config = login_with_prompt(client, config)
+            torrents = client.torrents()
+            actions_performed = process_torrents(client, config, torrents)
+
         if actions_performed == 0:
             print(
                 "No actions were performed. All trackers are functional or private torrents were skipped."
             )
+    except requests.exceptions.ConnectTimeout:
+        print(
+            f"Timed out connecting to qBittorrent at {config.qbittorrent_url} "
+            f"after {CONNECT_TIMEOUT_SECONDS:.0f} seconds. "
+            "Check if the Web UI is running and the port is reachable."
+        )
+        sys.exit(1)
+    except requests.exceptions.ReadTimeout:
+        print(
+            f"qBittorrent at {config.qbittorrent_url} took too long to respond "
+            f"(>{READ_TIMEOUT_SECONDS:.0f} seconds). "
+            "Check if the Web UI is responsive."
+        )
+        sys.exit(1)
+    except requests.exceptions.Timeout:
+        print(
+            f"Request to qBittorrent at {config.qbittorrent_url} timed out. "
+            "Check the Web UI connectivity."
+        )
+        sys.exit(1)
     except requests.exceptions.ConnectionError:
         print(
             f"Failed to connect to qBittorrent at {config.qbittorrent_url}. "
@@ -355,7 +375,7 @@ def main() -> None:
         print(exc)
         sys.exit(1)
     finally:
-        logout(session, config.qbittorrent_url)
+        client.logout()
 
 
 if __name__ == "__main__":
