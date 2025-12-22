@@ -8,7 +8,7 @@
 #   5. Update Oh-My-Zsh
 #   6. Rotate old /tmp upgrade logs
 
-sudo true
+sudo -v
 set -euo pipefail
 setopt MULTIOS
 trap 'error_exit "on line $LINENO"' ERR
@@ -36,19 +36,31 @@ error_exit() {
     exit 1
 }
 run_cmd() {
-    local cmd="$1"
-    local sep="${2:-true}"
-    print_in_color "$BLUE" "Running: $cmd"
-    eval "$cmd" || error_exit "Command failed: $cmd"
-    [[ $sep == true ]] && print_separator
+    print_in_color "$BLUE" "Running: $*"
+    "$@" || error_exit "Command failed: $*"
+    print_separator
 }
-ensure_command() { command -v "$1" &>/dev/null || error_exit "Required command '$1' is not installed."; }
+ensure_command() {
+    command -v "$1" &>/dev/null || error_exit "Required command '$1' is not installed."
+}
 
 # Check required tools are installed
 verify_dependencies() {
     print_in_color "$GREEN" "Verifying required commands..."
-    local cmds=(deborphan apt-get pip3 python3 git cargo tldr pihole updatedb)
-    for c in "${cmds[@]}"; do ensure_command "$c"; done
+    local commands=(
+        apt-get
+        cargo
+        deborphan
+        git
+        pihole
+        pip3
+        python3
+        tldr
+        updatedb
+    )
+    for cmd in "${commands[@]}"; do
+        ensure_command "$cmd"
+    done
     print_in_color "$GREEN" "All required commands are available."
     print_separator
 }
@@ -58,9 +70,9 @@ verify_dependencies() {
 upgrade_pihole() {
     print_in_color "$GREEN" "Downloading latest root.hints..."
     local hints_dir=/var/lib/unbound
-    local hints_file=$hints_dir/root.hints
-    run_cmd "sudo mkdir -p ${hints_dir}"
-    run_cmd "sudo wget -q -O ${hints_file} https://www.internic.net/domain/named.root"
+    local hints_file="$hints_dir/root.hints"
+    run_cmd sudo mkdir -p "$hints_dir"
+    run_cmd sudo wget -q -O "$hints_file" https://www.internic.net/domain/named.root
     local date_line
     date_line=$(grep -i 'last update:' "${hints_file}" 2>/dev/null || true)
     if [[ -n $date_line ]]; then
@@ -82,7 +94,7 @@ upgrade_pihole() {
     if echo "$up_output" | grep -qi 'gravity.*update\|Re-running gravity\|gravity list was updated'; then
         print_in_color "$GREEN" "Pi-hole already updated gravity lists during upgrade."
     else
-        run_cmd "sudo pihole -g"
+        run_cmd sudo pihole -g
     fi
     print_in_color "$GREEN" "Pi-hole updated successfully."
     print_separator
@@ -91,18 +103,19 @@ upgrade_pihole() {
 # Upgrade APT packages
 upgrade_apt_packages() {
     print_in_color "$GREEN" "Upgrading APT packages..."
-    run_cmd "sudo apt-get install --fix-broken -y"
-    run_cmd "sudo apt-get full-upgrade -y"
-    run_cmd "sudo apt-get autoremove -y"
-    run_cmd "sudo apt-get autoclean"
-    run_cmd "sudo apt-get clean"
+    run_cmd sudo apt-get update
+    run_cmd sudo apt-get install --fix-broken -y
+    run_cmd sudo apt full-upgrade -y
+    run_cmd sudo apt-get autoremove -y
+    run_cmd sudo apt-get autoclean
+    run_cmd sudo apt-get clean
 }
 
 # Refresh tldr and mlocate databases
 update_databases() {
     print_in_color "$GREEN" "Updating command databases..."
-    run_cmd "tldr --update"
-    run_cmd "sudo updatedb"
+    run_cmd tldr --update
+    run_cmd sudo updatedb
     print_in_color "$GREEN" "Databases updated successfully."
     print_separator
 }
@@ -111,10 +124,10 @@ update_databases() {
 remove_orphaned_packages() {
     print_in_color "$GREEN" "Removing orphaned packages..."
     local orphans
-    orphans=$(deborphan | tr '\n' ' ')
-    if [[ -n $orphans ]]; then
+    orphans=$(deborphan)
+    if [[ -n "$orphans" ]]; then
         print_in_color "$BLUE" "Orphaned packages found:\n$orphans"
-        run_cmd "sudo apt-get purge -y $orphans"
+        run_cmd sudo apt-get purge -y $orphans
     else
         print_in_color "$GREEN" "No orphaned packages to remove."
         print_separator
@@ -124,7 +137,7 @@ remove_orphaned_packages() {
 # Vacuum systemd journal to ≤100MB
 clean_journal_logs() {
     print_in_color "$GREEN" "Cleaning journal logs..."
-    run_cmd "sudo journalctl --vacuum-size=100M"
+    run_cmd sudo journalctl --vacuum-size=100M
 }
 
 # Upgrade Oh My Zsh framework
@@ -135,8 +148,9 @@ upgrade_oh_my_zsh() {
 
 # Remove old log files from /tmp
 clean_old_logs() {
-    print_in_color "$GREEN" "Cleaning old log files..."
-    run_cmd "sudo find /tmp -type f -name 'log-upgrade-*.log' -mtime +7 -delete"
+    print_in_color "$GREEN" "Cleaning up old log files..."
+    run_cmd sudo find /tmp -type f -name 'log-upgrade-*.log' -mtime +7 -delete
+    print_in_color "$GREEN" "Old log files cleaned up."
     print_separator
 }
 
