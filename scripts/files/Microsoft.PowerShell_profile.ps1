@@ -199,6 +199,70 @@ function Invoke-Rclone {
 Set-Alias -Name rclone -Value Invoke-Rclone
 
 ################################################################################
+# Dangerous helpers: fast recursive directory delete (with guard rails)
+################################################################################
+
+function Remove-DirectoryTree {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param(
+        # Directory to delete. Tab completion works naturally for filesystem paths.
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias('FullName', 'PSPath')]
+        [string]$Path,
+
+        # Allow deleting a drive root (e.g. I:\). This is blocked by default.
+        [switch]$AllowDriveRoot
+    )
+
+    process {
+        $item = $null
+        try {
+            $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        }
+        catch {
+            throw "Directory not found or inaccessible: $Path"
+        }
+
+        if (-not $item.PSIsContainer) {
+            throw "Path is not a directory: $($item.FullName)"
+        }
+
+        $fullPath = $item.FullName
+
+        # Guard: prevent accidental drive-root deletion unless explicitly allowed.
+        $root = [System.IO.Path]::GetPathRoot($fullPath)
+        if (-not $AllowDriveRoot) {
+            $normFull = $fullPath.TrimEnd('\')
+            $normRoot = $root.TrimEnd('\')
+            if ($normFull.Equals($normRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing to delete drive root '$root' without -AllowDriveRoot."
+            }
+        }
+
+        if (-not $PSCmdlet.ShouldProcess($fullPath, "Delete directory tree")) {
+            return
+        }
+
+        try {
+            # Fast path: .NET recursive delete.
+            [System.IO.Directory]::Delete($fullPath, $true)
+        }
+        catch [System.UnauthorizedAccessException] {
+            throw "Access denied while deleting `"$fullPath`". Try running an elevated PowerShell, or fix permissions. Details: $($_.Exception.Message)"
+        }
+        catch [System.IO.IOException] {
+            throw "I/O error while deleting `"$fullPath`". It may contain locked files or protected locations. Details: $($_.Exception.Message)"
+        }
+        catch {
+            throw "Failed to delete `"$fullPath`". Details: $($_.Exception.Message)"
+        }
+    }
+}
+
+# Convenience alias that matches your requested command name, without taking an unapproved verb as the function name.
+Set-Alias -Name Delete-Directory -Value Remove-DirectoryTree
+
+################################################################################
 # Zsh-style completion and history using PSReadLine
 ################################################################################
 
