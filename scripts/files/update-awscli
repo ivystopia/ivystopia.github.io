@@ -1,0 +1,108 @@
+#! /usr/bin/env zsh
+set -euo pipefail
+
+# Helper functions for consistent output and errors
+die() { print -r -- "$*" >&2; exit 1; }
+log() { print -r -- ""; print -r -- "$*"; }
+
+# Pick install locations based on privileges
+if (( EUID == 0 )); then
+  BIN_DIR=/usr/local/bin
+  INSTALL_DIR=/usr/local/aws-cli
+else
+  BIN_DIR="$HOME/.local/bin"
+  INSTALL_DIR="$HOME/.local/lib/aws-cli"
+fi
+
+# Verify required tools are available
+for c in curl gpg unzip mktemp; do
+  (( $+commands[$c] )) || die "Unavailable: $c"
+done
+
+# Create a temporary workspace and clean it on exit
+tmp_dir="$(mktemp -d)"
+orig_dir="$PWD"
+cleanup() {
+  cd "$orig_dir" 2>/dev/null || true
+  [[ -n ${tmp_dir:-} ]] && rm -rf -- "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
+cd "$tmp_dir"
+
+# Detect architecture and select the correct AWS build
+arch="$(uname -m)"
+case "$arch" in
+  x86_64|amd64) arch=x86_64 ;;
+  aarch64|arm64) arch=aarch64 ;;
+  *) die "Unsupported architecture: $arch" ;;
+esac
+
+# Download installer and signature
+zip_url="https://awscli.amazonaws.com/awscli-exe-linux-$arch.zip"
+sig_url="https://awscli.amazonaws.com/awscli-exe-linux-$arch.zip.sig"
+curl_opts=(--fail --location --silent --show-error --proto '=https' --tlsv1.2)
+print -r -- "Downloading $zip_url"
+curl "${curl_opts[@]}" "$zip_url" -o awscliv2.zip
+print -r -- "Downloading $sig_url"
+curl "${curl_opts[@]}" "$sig_url" -o awscliv2.sig
+
+# Write the AWS CLI team public key
+key_file="$tmp_dir/aws-cli-public-key.pgp"
+cat <<'KEY' > "$key_file"
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQINBF2Cr7UBEADJZHcgusOJl7ENSyumXh85z0TRV0xJorM2B/JL0kHOyigQluUG
+ZMLhENaG0bYatdrKP+3H91lvK050pXwnO/R7fB/FSTouki4ciIx5OuLlnJZIxSzx
+PqGl0mkxImLNbGWoi6Lto0LYxqHN2iQtzlwTVmq9733zd3XfcXrZ3+LblHAgEt5G
+TfNxEKJ8soPLyWmwDH6HWCnjZ/aIQRBTIQ05uVeEoYxSh6wOai7ss/KveoSNBbYz
+gbdzoqI2Y8cgH2nbfgp3DSasaLZEdCSsIsK1u05CinE7k2qZ7KgKAUIcT/cR/grk
+C6VwsnDU0OUCideXcQ8WeHutqvgZH1JgKDbznoIzeQHJD238GEu+eKhRHcz8/jeG
+94zkcgJOz3KbZGYMiTh277Fvj9zzvZsbMBCedV1BTg3TqgvdX4bdkhf5cH+7NtWO
+lrFj6UwAsGukBTAOxC0l/dnSmZhJ7Z1KmEWilro/gOrjtOxqRQutlIqG22TaqoPG
+fYVN+en3Zwbt97kcgZDwqbuykNt64oZWc4XKCa3mprEGC3IbJTBFqglXmZ7l9ywG
+EEUJYOlb2XrSuPWml39beWdKM8kzr1OjnlOm6+lpTRCBfo0wa9F8YZRhHPAkwKkX
+XDeOGpWRj4ohOx0d2GWkyV5xyN14p2tQOCdOODmz80yUTgRpPVQUtOEhXQARAQAB
+tCFBV1MgQ0xJIFRlYW0gPGF3cy1jbGlAYW1hem9uLmNvbT6JAlQEEwEIAD4CGwMF
+CwkIBwIGFQoJCAsCBBYCAwECHgECF4AWIQT7Xbd/1cEYuAURraimMQrMRnJHXAUC
+aGveYQUJDMpiLAAKCRCmMQrMRnJHXKBYD/9Ab0qQdGiO5hObchG8xh8Rpb4Mjyf6
+0JrVo6m8GNjNj6BHkSc8fuTQJ/FaEhaQxj3pjZ3GXPrXjIIVChmICLlFuRXYzrXc
+Pw0lniybypsZEVai5kO0tCNBCCFuMN9RsmmRG8mf7lC4FSTbUDmxG/QlYK+0IV/l
+uJkzxWa+rySkdpm0JdqumjegNRgObdXHAQDWlubWQHWyZyIQ2B4U7AxqSpcdJp6I
+S4Zds4wVLd1WE5pquYQ8vS2cNlDm4QNg8wTj58e3lKN47hXHMIb6CHxRnb947oJa
+pg189LLPR5koh+EorNkA1wu5mAJtJvy5YMsppy2y/kIjp3lyY6AmPT1posgGk70Z
+CmToEZ5rbd7ARExtlh76A0cabMDFlEHDIK8RNUOSRr7L64+KxOUegKBfQHb9dADY
+qqiKqpCbKgvtWlds909Ms74JBgr2KwZCSY1HaOxnIr4CY43QRqAq5YHOay/mU+6w
+hhmdF18vpyK0vfkvvGresWtSXbag7Hkt3XjaEw76BzxQH21EBDqU8WJVjHgU6ru+
+DJTs+SxgJbaT3hb/vyjlw0lK+hFfhWKRwgOXH8vqducF95NRSUxtS4fpqxWVaw3Q
+V2OWSjbne99A5EPEySzryFTKbMGwaTlAwMCwYevt4YT6eb7NmFhTx0Fis4TalUs+
+j+c7Kg92pDx2uQ==
+=OBAt
+-----END PGP PUBLIC KEY BLOCK-----
+KEY
+
+# Import the key into a throwaway keyring and verify the download
+gnupg_dir="$tmp_dir/gnupg"
+mkdir -p "$gnupg_dir"
+chmod 700 "$gnupg_dir"
+log "Importing AWS CLI signing key"
+gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import "$key_file"
+log "Verifying installer signature"
+gpg --batch --homedir "$gnupg_dir" --verify awscliv2.sig awscliv2.zip
+
+# Unpack the installer
+log "unzip -q awscliv2.zip"
+unzip -q awscliv2.zip
+
+# Prepare install directories and guard aws path
+install_root="${INSTALL_DIR:h}"
+mkdir -p "$BIN_DIR" "$install_root"
+[[ -e "$BIN_DIR/aws" && ! -L "$BIN_DIR/aws" ]] && die "$BIN_DIR/aws exists and is not a symlink."
+
+# Run the installer
+install_cmd=(./aws/install --bin-dir "$BIN_DIR" --install-dir "$INSTALL_DIR" --update)
+log "\$ ${(j: :)${(q-)install_cmd[@]}}"
+"${install_cmd[@]}"
+
+# Verify the installed CLI
+log "\$ $BIN_DIR/aws --version"
+"$BIN_DIR/aws" --version
