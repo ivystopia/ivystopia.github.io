@@ -36,8 +36,11 @@ error_exit() {
     exit 1
 }
 run_cmd() {
-    print_in_color "$BLUE" "Running: $*"
-    "$@" || error_exit "Command failed: $*"
+    local cmd="$*"
+    cmd=${cmd//$'\n'/ }
+    cmd=${cmd//$'\r'/ }
+    print_in_color "$BLUE" "Running: $cmd"
+    "$@" || error_exit "Command failed: $cmd"
     print_separator
 }
 ensure_command() {
