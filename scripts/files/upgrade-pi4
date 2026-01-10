@@ -126,11 +126,13 @@ update_databases() {
 # Remove orphaned packages using deborphan
 remove_orphaned_packages() {
     print_in_color "$GREEN" "Removing orphaned packages..."
-    local orphans
-    orphans=$(deborphan)
-    if [[ -n "$orphans" ]]; then
-        print_in_color "$BLUE" "Orphaned packages found:\n$orphans"
-        run_cmd sudo apt-get purge -y $orphans
+
+    local -a orphans
+    orphans=("${(@f)$(deborphan | sed -e '/^[[:space:]]*$/d')}")
+
+    if (( ${#orphans[@]} )); then
+        print_in_color "$BLUE" $'Orphaned packages found:\n'"${(F)orphans}"
+        run_cmd sudo apt-get purge -y -- "${orphans[@]}"
     else
         print_in_color "$GREEN" "No orphaned packages to remove."
         print_separator
