@@ -1,0 +1,28 @@
+#!/bin/sh
+# Colorise AWS CLI JSON output when used as AWS_PAGER
+# e.g. export AWS_PAGER=aws-color-pager
+set -eu
+
+# Whether to also pipe output through 'less -R' for paging.
+PAGE="0"
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+# Read all output first so we can validate JSON without consuming stdin.
+cat > "$tmp"
+
+# If it's valid JSON, pretty-print with color; otherwise pass through unchanged.
+if jq -e . "$tmp" >/dev/null 2>&1; then
+  if [ "$PAGE" = "1" ]; then
+    jq -C . "$tmp" | less -R
+  else
+    jq -C . "$tmp"
+  fi
+else
+  if [ "$PAGE" = "1" ]; then
+    cat "$tmp" | less -R
+  else
+    cat "$tmp"
+  fi
+fi
