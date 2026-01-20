@@ -15,7 +15,7 @@ else
 fi
 
 # Verify required tools are available
-for c in curl gpg unzip mktemp; do
+for c in curl gpg unzip mktemp awk; do
   (( $+commands[$c] )) || die "Unavailable: $c"
 done
 
@@ -47,6 +47,7 @@ print -r -- "Downloading $sig_url"
 curl "${curl_opts[@]}" "$sig_url" -o awscliv2.sig
 
 # Write the AWS CLI team public key
+aws_fpr="FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
 key_file="$tmp_dir/aws-cli-public-key.pgp"
 cat <<'KEY' > "$key_file"
 -----BEGIN PGP PUBLIC KEY BLOCK-----
@@ -80,14 +81,33 @@ j+c7Kg92pDx2uQ==
 -----END PGP PUBLIC KEY BLOCK-----
 KEY
 
-# Import the key into a throwaway keyring and verify the download
-gnupg_dir="$tmp_dir/gnupg"
-mkdir -p "$gnupg_dir"
-chmod 700 "$gnupg_dir"
-log "Importing AWS CLI signing key"
-gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import "$key_file"
-log "Verifying installer signature"
-gpg --batch --homedir "$gnupg_dir" --verify awscliv2.sig awscliv2.zip
+# Prefer the user's trusted keyring if the AWS key is already trusted there.
+user_key_validity=""
+if gpg --batch --quiet --list-keys "$aws_fpr" >/dev/null 2>&1; then
+  user_key_validity="$(gpg --batch --with-colons --list-keys "$aws_fpr" \
+    | awk -F: '/^pub:/ {print $2; exit}')"
+fi
+
+use_user_keyring=0
+case "$user_key_validity" in
+  u|f|m) use_user_keyring=1 ;;
+esac
+
+if (( use_user_keyring )); then
+  log "Using trusted AWS CLI key from your keyring"
+  log "Verifying installer signature"
+  gpg --batch --verify awscliv2.sig awscliv2.zip
+else
+  # Import the key into a throwaway keyring and trust it locally to avoid warnings.
+  gnupg_dir="$tmp_dir/gnupg"
+  mkdir -p "$gnupg_dir"
+  chmod 700 "$gnupg_dir"
+  log "Importing AWS CLI signing key"
+  gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import "$key_file"
+  print -r -- "${aws_fpr}:5:" | gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import-ownertrust
+  log "Verifying installer signature"
+  gpg --batch --homedir "$gnupg_dir" --verify awscliv2.sig awscliv2.zip
+fi
 
 # Unpack the installer
 log "unzip -q awscliv2.zip"
