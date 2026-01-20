@@ -1,0 +1,45 @@
+#!/bin/sh
+# Add a domain to the Pi-hole allowlist, with optional wildcard support.
+
+usage() {
+    printf 'Usage: whitelist [-w|--wild] <domain>\n' >&2
+}
+
+# SSH to this
+PIHOLE=pi4
+
+opt_wild=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -w|--wild)
+            opt_wild=1
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            printf 'whitelist: unknown option: %s\n' "$1" >&2
+            usage
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ "$#" -ne 1 ]; then
+    usage
+    exit 1
+fi
+
+domain=$1
+
+if [ "$opt_wild" -eq 1 ]; then
+    ssh "$PIHOLE" "pihole allowlist $domain && pihole --allow-wild $domain"
+else
+    ssh "$PIHOLE" "pihole allowlist $domain"
+fi
