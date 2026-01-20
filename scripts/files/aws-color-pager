@@ -1,27 +1,32 @@
 #!/bin/sh
 # Colorise AWS CLI JSON output when used as AWS_PAGER
-# e.g. export AWS_PAGER=aws-color-pager
+# Usage:
+#   export AWS_PAGER=aws-color-pager
+# Optional:
+#   export AWS_COLOR_PAGER_PAGE=1   # force paging
+#   export AWS_COLOR_PAGER_PAGE=0   # disable paging (default)
+
 set -eu
 
-# Whether to also pipe output through 'less -R' for paging.
-PAGE="0"
+PAGE="${AWS_COLOR_PAGER_PAGE:-0}"
 
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+tmp="$(mktemp "${TMPDIR:-/tmp}/aws-color-pager.XXXXXX")"
+out="$(mktemp "${TMPDIR:-/tmp}/aws-color-pager.XXXXXX")"
+trap 'rm -f "$tmp" "$out"' EXIT
 
-# Read all output first so we can validate JSON without consuming stdin.
-cat > "$tmp"
+# Read all output first so we can validate/transform without consuming stdin.
+cat >"$tmp"
 
-# If it's valid JSON, pretty-print with color; otherwise pass through unchanged.
-if jq -e . "$tmp" >/dev/null 2>&1; then
-  if [ "$PAGE" = "1" ]; then
-    jq -C . "$tmp" | less -R
+# Try to pretty-print + colour once. If it fails, pass through original.
+if jq -C . "$tmp" >"$out" 2>/dev/null; then
+  if [ "$PAGE" = "1" ] && [ -t 1 ]; then
+    less -R <"$out"
   else
-    jq -C . "$tmp"
+    cat "$out"
   fi
 else
-  if [ "$PAGE" = "1" ]; then
-    cat "$tmp" | less -R
+  if [ "$PAGE" = "1" ] && [ -t 1 ]; then
+    less -R <"$tmp"
   else
     cat "$tmp"
   fi
