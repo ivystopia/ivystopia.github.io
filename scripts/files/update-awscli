@@ -29,6 +29,17 @@ cleanup() {
 trap cleanup EXIT INT TERM
 cd "$tmp_dir"
 
+# Extract the awscli version from a command invocation.
+awscli_version() {
+  local -a cmd
+  cmd=("$@")
+  local out token
+  out="$("${cmd[@]}" --version 2>&1)" || return 1
+  token="${out%% *}"
+  token="${token#aws-cli/}"
+  [[ -n "$token" ]] && print -r -- "$token"
+}
+
 # Detect architecture and select the correct AWS build
 arch="$(uname -m)"
 case "$arch" in
@@ -118,11 +129,25 @@ install_root="${INSTALL_DIR:h}"
 mkdir -p "$BIN_DIR" "$install_root"
 [[ -e "$BIN_DIR/aws" && ! -L "$BIN_DIR/aws" ]] && die "$BIN_DIR/aws exists and is not a symlink."
 
+# Capture existing awscli version before upgrade if available.
+old_version=""
+if [[ -x "$BIN_DIR/aws" ]]; then
+  old_version="$(awscli_version "$BIN_DIR/aws")" || old_version=""
+elif (( $+commands[aws] )); then
+  old_version="$(awscli_version aws)" || old_version=""
+fi
+
 # Run the installer
 install_cmd=(./aws/install --bin-dir "$BIN_DIR" --install-dir "$INSTALL_DIR" --update)
 log "\$ ${(j: :)${(q-)install_cmd[@]}}"
 "${install_cmd[@]}"
 
-# Verify the installed CLI
-log "\$ $BIN_DIR/aws --version"
-"$BIN_DIR/aws" --version
+# Verify the installed CLI and report version changes
+new_version="$(awscli_version "$BIN_DIR/aws")" || die "Unable to determine awscli version"
+if [[ -n "$old_version" && "$old_version" != "$new_version" ]]; then
+  log "Upgraded awscli from v${old_version} to v${new_version}"
+elif [[ -n "$old_version" ]]; then
+  log "awscli v${old_version} is already the latest version"
+else
+  log "Installed awscli v${new_version}"
+fi
