@@ -1,12 +1,22 @@
-#! /usr/bin/env zsh
-set -euo pipefail
+#! /bin/sh
+#
+# Update awscli to the latest version (Linux/macOS).
+set -eu
 
 # Helper functions for consistent output and errors
-die() { print -r -- "$*" >&2; exit 1; }
-log() { print -r -- ""; print -r -- "$*"; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+log() { printf '\n%s\n' "$*"; }
+
+# Detect OS
+os="$(uname -s 2>/dev/null || echo unknown)"
+case "$os" in
+  Linux) os=linux ;;
+  Darwin) os=darwin ;;
+  *) die "Unsupported OS: $os" ;;
+esac
 
 # Pick install locations based on privileges
-if (( EUID == 0 )); then
+if [ "$(id -u)" -eq 0 ]; then
   BIN_DIR=/usr/local/bin
   INSTALL_DIR=/usr/local/aws-cli
 else
@@ -15,52 +25,64 @@ else
 fi
 
 # Verify required tools are available
-for c in curl gpg unzip mktemp awk; do
-  (( $+commands[$c] )) || die "Unavailable: $c"
+req_tools="curl mktemp"
+if [ "$os" = "linux" ]; then
+  req_tools="$req_tools gpg unzip awk"
+else
+  req_tools="$req_tools installer"
+fi
+
+for c in $req_tools; do
+  command -v "$c" >/dev/null 2>&1 || die "Unavailable: $c"
 done
 
 # Create a temporary workspace and clean it on exit
-tmp_dir="$(mktemp -d)"
-orig_dir="$PWD"
+tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t awscli)" || die "Unable to create temp dir"
+orig_dir="$(pwd)"
 cleanup() {
-  cd "$orig_dir" 2>/dev/null || true
-  [[ -n ${tmp_dir:-} ]] && rm -rf -- "$tmp_dir"
+  cd "$orig_dir" 2>/dev/null || :
+  if [ -n "${tmp_dir:-}" ]; then
+    rm -rf "$tmp_dir"
+  fi
 }
 trap cleanup EXIT INT TERM
 cd "$tmp_dir"
 
 # Extract the awscli version from a command invocation.
 awscli_version() {
-  local -a cmd
-  cmd=("$@")
-  local out token
-  out="$("${cmd[@]}" --version 2>&1)" || return 1
-  token="${out%% *}"
-  token="${token#aws-cli/}"
-  [[ -n "$token" ]] && print -r -- "$token"
+  awscli_cmd=$1
+  if out=$("$awscli_cmd" --version 2>&1); then
+    token=${out%% *}
+    token=${token#aws-cli/}
+    [ -n "$token" ] && printf '%s\n' "$token"
+    return 0
+  fi
+  return 1
 }
 
-# Detect architecture and select the correct AWS build
-arch="$(uname -m)"
-case "$arch" in
-  x86_64|amd64) arch=x86_64 ;;
-  aarch64|arm64) arch=aarch64 ;;
-  *) die "Unsupported architecture: $arch" ;;
-esac
+curl_opts="--fail --location --silent --show-error"
 
-# Download installer and signature
-zip_url="https://awscli.amazonaws.com/awscli-exe-linux-$arch.zip"
-sig_url="https://awscli.amazonaws.com/awscli-exe-linux-$arch.zip.sig"
-curl_opts=(--fail --location --silent --show-error --proto '=https' --tlsv1.2)
-print -r -- "Downloading $zip_url"
-curl "${curl_opts[@]}" "$zip_url" -o awscliv2.zip
-print -r -- "Downloading $sig_url"
-curl "${curl_opts[@]}" "$sig_url" -o awscliv2.sig
+if [ "$os" = "linux" ]; then
+  # Detect architecture and select the correct AWS build
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) arch=x86_64 ;;
+    aarch64|arm64) arch=aarch64 ;;
+    *) die "Unsupported architecture: $arch" ;;
+  esac
 
-# Write the AWS CLI team public key
-aws_fpr="FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
-key_file="$tmp_dir/aws-cli-public-key.pgp"
-cat <<'KEY' > "$key_file"
+  # Download installer and signature
+  zip_url="https://awscli.amazonaws.com/awscli-exe-linux-$arch.zip"
+  sig_url="$zip_url.sig"
+  printf '%s\n' "Downloading $zip_url"
+  curl $curl_opts "$zip_url" -o awscliv2.zip
+  printf '%s\n' "Downloading $sig_url"
+  curl $curl_opts "$sig_url" -o awscliv2.sig
+
+  # Write the AWS CLI team public key
+  aws_fpr="FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
+  key_file="$tmp_dir/aws-cli-public-key.pgp"
+  cat <<'KEY' > "$key_file"
 -----BEGIN PGP PUBLIC KEY BLOCK-----
 
 mQINBF2Cr7UBEADJZHcgusOJl7ENSyumXh85z0TRV0xJorM2B/JL0kHOyigQluUG
@@ -92,61 +114,127 @@ j+c7Kg92pDx2uQ==
 -----END PGP PUBLIC KEY BLOCK-----
 KEY
 
-# Prefer the user's trusted keyring if the AWS key is already trusted there.
-user_key_validity=""
-if gpg --batch --quiet --list-keys "$aws_fpr" >/dev/null 2>&1; then
-  user_key_validity="$(gpg --batch --with-colons --list-keys "$aws_fpr" \
-    | awk -F: '/^pub:/ {print $2; exit}')"
-fi
+  # Prefer the user's trusted keyring if the AWS key is already trusted there.
+  user_key_validity=""
+  if gpg --batch --quiet --list-keys "$aws_fpr" >/dev/null 2>&1; then
+    user_key_validity=$(gpg --batch --with-colons --list-keys "$aws_fpr" \
+      | awk -F: '/^pub:/ {print $2; exit}')
+  fi
 
-use_user_keyring=0
-case "$user_key_validity" in
-  u|f|m) use_user_keyring=1 ;;
-esac
+  use_user_keyring=0
+  case "$user_key_validity" in
+    u|f|m) use_user_keyring=1 ;;
+  esac
 
-if (( use_user_keyring )); then
-  log "Using trusted AWS CLI key from your keyring"
-  log "Verifying installer signature"
-  gpg --batch --verify awscliv2.sig awscliv2.zip
+  if [ "$use_user_keyring" -eq 1 ]; then
+    log "Using trusted AWS CLI key from your keyring"
+    log "Verifying installer signature"
+    gpg --batch --verify awscliv2.sig awscliv2.zip
+  else
+    # Import the key into a throwaway keyring and trust it locally to avoid warnings.
+    gnupg_dir="$tmp_dir/gnupg"
+    mkdir -p "$gnupg_dir"
+    chmod 700 "$gnupg_dir"
+    log "Importing AWS CLI signing key"
+    gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import "$key_file"
+    printf '%s\n' "${aws_fpr}:5:" | gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import-ownertrust
+    log "Verifying installer signature"
+    gpg --batch --homedir "$gnupg_dir" --verify awscliv2.sig awscliv2.zip
+  fi
+
+  # Unpack the installer
+  log "unzip -q awscliv2.zip"
+  unzip -q awscliv2.zip
 else
-  # Import the key into a throwaway keyring and trust it locally to avoid warnings.
-  gnupg_dir="$tmp_dir/gnupg"
-  mkdir -p "$gnupg_dir"
-  chmod 700 "$gnupg_dir"
-  log "Importing AWS CLI signing key"
-  gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import "$key_file"
-  print -r -- "${aws_fpr}:5:" | gpg --batch --quiet --no-tty --homedir "$gnupg_dir" --import-ownertrust
-  log "Verifying installer signature"
-  gpg --batch --homedir "$gnupg_dir" --verify awscliv2.sig awscliv2.zip
+  # Download macOS installer package
+  pkg_url="https://awscli.amazonaws.com/AWSCLIV2.pkg"
+  printf '%s\n' "Downloading $pkg_url"
+  curl $curl_opts "$pkg_url" -o AWSCLIV2.pkg
 fi
-
-# Unpack the installer
-log "unzip -q awscliv2.zip"
-unzip -q awscliv2.zip
 
 # Prepare install directories and guard aws path
-install_root="${INSTALL_DIR:h}"
+install_root="${INSTALL_DIR%/*}"
 mkdir -p "$BIN_DIR" "$install_root"
-[[ -e "$BIN_DIR/aws" && ! -L "$BIN_DIR/aws" ]] && die "$BIN_DIR/aws exists and is not a symlink."
+if [ -e "$BIN_DIR/aws" ] && [ ! -L "$BIN_DIR/aws" ]; then
+  die "$BIN_DIR/aws exists and is not a symlink."
+fi
 
 # Capture existing awscli version before upgrade if available.
 old_version=""
-if [[ -x "$BIN_DIR/aws" ]]; then
-  old_version="$(awscli_version "$BIN_DIR/aws")" || old_version=""
-elif (( $+commands[aws] )); then
-  old_version="$(awscli_version aws)" || old_version=""
+if [ -x "$BIN_DIR/aws" ]; then
+  if old_version=$(awscli_version "$BIN_DIR/aws"); then
+    :
+  else
+    old_version=""
+  fi
+elif command -v aws >/dev/null 2>&1; then
+  if old_version=$(awscli_version aws); then
+    :
+  else
+    old_version=""
+  fi
 fi
 
 # Run the installer
-install_cmd=(./aws/install --bin-dir "$BIN_DIR" --install-dir "$INSTALL_DIR" --update)
-log "\$ ${(j: :)${(q-)install_cmd[@]}}"
-"${install_cmd[@]}"
+if [ "$os" = "linux" ]; then
+  log "\$ ./aws/install --bin-dir \"$BIN_DIR\" --install-dir \"$INSTALL_DIR\" --update"
+  ./aws/install --bin-dir "$BIN_DIR" --install-dir "$INSTALL_DIR" --update
+else
+  if [ "$(id -u)" -eq 0 ]; then
+    log "\$ installer -pkg AWSCLIV2.pkg -target /"
+    installer -pkg AWSCLIV2.pkg -target /
+  else
+    choices_file="$tmp_dir/choices.xml"
+    cat > "$choices_file" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <array>
+    <dict>
+      <key>choiceAttribute</key>
+      <string>customLocation</string>
+      <key>attributeSetting</key>
+      <string>$install_root</string>
+      <key>choiceIdentifier</key>
+      <string>default</string>
+    </dict>
+  </array>
+</plist>
+EOF
+    log "\$ installer -pkg AWSCLIV2.pkg -target CurrentUserHomeDirectory -applyChoiceChangesXML \"$choices_file\""
+    installer -pkg AWSCLIV2.pkg -target CurrentUserHomeDirectory -applyChoiceChangesXML "$choices_file"
+
+    aws_target="$INSTALL_DIR/aws"
+    aws_completer_target="$INSTALL_DIR/aws_completer"
+    if [ ! -e "$aws_target" ] && [ -e "$INSTALL_DIR/v2/current/bin/aws" ]; then
+      aws_target="$INSTALL_DIR/v2/current/bin/aws"
+      aws_completer_target="$INSTALL_DIR/v2/current/bin/aws_completer"
+    fi
+
+    [ -e "$aws_target" ] || die "Unable to locate aws binary under $INSTALL_DIR"
+
+    if [ -L "$BIN_DIR/aws" ]; then
+      rm -f "$BIN_DIR/aws"
+    fi
+    ln -s "$aws_target" "$BIN_DIR/aws"
+
+    if [ -e "$aws_completer_target" ]; then
+      if [ -L "$BIN_DIR/aws_completer" ]; then
+        rm -f "$BIN_DIR/aws_completer"
+      fi
+      ln -s "$aws_completer_target" "$BIN_DIR/aws_completer"
+    fi
+  fi
+fi
 
 # Verify the installed CLI and report version changes
-new_version="$(awscli_version "$BIN_DIR/aws")" || die "Unable to determine awscli version"
-if [[ -n "$old_version" && "$old_version" != "$new_version" ]]; then
+if ! new_version=$(awscli_version "$BIN_DIR/aws"); then
+  die "Unable to determine awscli version"
+fi
+
+if [ -n "$old_version" ] && [ "$old_version" != "$new_version" ]; then
   log "Upgraded awscli from v${old_version} to v${new_version}"
-elif [[ -n "$old_version" ]]; then
+elif [ -n "$old_version" ]; then
   log "awscli v${old_version} is already the latest version"
 else
   log "Installed awscli v${new_version}"
