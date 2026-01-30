@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# p2pool-status
+# --------------
+# Runs the live p2pool console "status" command inside the container and prints
+# the raw, colored output by tailing container logs from a fresh timestamp.
+#
+# Configuration:
+#   P2POOL_CONTAINER   Container name to target (default: "p2pool").
+#
+# This script is POSIX sh. The inner command uses Bash inside the container
+# because /dev/tcp requires Bash or ksh.
+
+set -eu
+
+container=${P2POOL_CONTAINER:-p2pool}
+
+fail() {
+  printf 'p2pool-status: %s\n' "$1" >&2
+  exit 1
+}
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
+}
+
+require docker
+
+if ! docker inspect -f '{{.State.Running}}' "$container" >/dev/null 2>&1; then
+  fail "container ${container} is not running"
+fi
+
+# RFC3339 UTC timestamp (POSIX date format directives).
+ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+# Send the cookie-prefixed command over p2pool's local console TCP socket.
+# The console port and cookie are published in /home/p2pool/local/console.
+docker exec "$container" bash -lc '
+  set -e
+  console=$(cat /home/p2pool/local/console)
+  port=$(printf "%s" "$console" | sed -n "s/.*\\\"tcp_port\\\":\\([0-9]*\\).*/\\1/p")
+  cookie=$(printf "%s" "$console" | sed -n "s/.*\\\"cookie\\\":\\\"\\([^\\\"]*\\)\\\".*/\\1/p")
+  exec 3<>/dev/tcp/127.0.0.1/$port
+  printf "%sstatus\\n" "$cookie" >&3
+'
+
+# Give p2pool a moment to emit the status block.
+sleep 0.5
+
+# Print raw console output (colors included).
+docker logs --since "$ts" "$container"
