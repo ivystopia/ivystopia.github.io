@@ -36,6 +36,12 @@ CHATGPT_HEADER_RE = re.compile(r"^\s*####\s*ChatGPT:\s*$", re.IGNORECASE)
 # Lines that equal “[Unsupported Content]” or the escaped form.
 UNSUPPORTED_LINE_RE = re.compile(r"^\\?\[Unsupported Content]\s*$", re.IGNORECASE)
 
+# Role headings emitted by the ChatGPT Exporter.
+ROLE_HEADER_RE = re.compile(r"^\s*####\s*(You|ChatGPT)\s*:?\s*$", re.IGNORECASE)
+
+# Markdown heading line.
+HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+
 
 # UTILITY HELPERS
 
@@ -70,6 +76,14 @@ class FenceTracker:
                 self.length = 0
 
 
+def _line_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return "\r\n"
+    if line.endswith("\n"):
+        return "\n"
+    return ""
+
+
 def _skip_unsupported_stub_block(lines: list[str], start: int) -> int | None:
     """Locate the end of an Unsupported Content stub after a ChatGPT header and return its index"""
     idx = start
@@ -90,6 +104,42 @@ def _skip_unsupported_stub_block(lines: list[str], start: int) -> int | None:
 
 
 # CLEANING STEPS
+
+
+def normalize_role_headings(lines: list[str]) -> list[str]:
+    """Convert ChatGPT Exporter role headings to H2 without trailing punctuation"""
+    out: list[str] = []
+    fence = FenceTracker()
+
+    for line in lines:
+        no_nl = line.rstrip("\r\n")
+        if fence.active:
+            out.append(line)
+            fence.update(no_nl)
+            continue
+
+        if FENCE_RE.match(no_nl):
+            out.append(line)
+            fence.update(no_nl)
+            continue
+
+        m = ROLE_HEADER_RE.match(no_nl)
+        if m:
+            role = m.group(1).strip().lower()
+            if role == "you":
+                label = "You"
+            elif role == "chatgpt":
+                label = "ChatGPT"
+            else:
+                label = m.group(1).strip()
+            out.append(f"## {label}{_line_ending(line)}")
+            fence.update(no_nl)
+            continue
+
+        out.append(line)
+        fence.update(no_nl)
+
+    return out
 
 
 def remove_unsupported_chatgpt_stubs(lines: list[str]) -> list[str]:
@@ -117,6 +167,71 @@ def remove_unsupported_chatgpt_stubs(lines: list[str]) -> list[str]:
                 continue
 
         # Keep the line and move on
+        out.append(line)
+        fence.update(no_nl)
+        i += 1
+
+    return out
+
+
+def unescape_tildes_outside_fences(lines: list[str]) -> list[str]:
+    """Convert '\\~' to '~' outside of code fences"""
+    out: list[str] = []
+    fence = FenceTracker()
+
+    for line in lines:
+        no_nl = line.rstrip("\r\n")
+        if fence.active:
+            out.append(line)
+        else:
+            out.append(line.replace("\\~", "~"))
+        fence.update(no_nl)
+
+    return out
+
+
+def normalize_backslash_linebreaks(lines: list[str]) -> list[str]:
+    """Remove trailing backslashes and join indented continuation lines (outside fences)"""
+    out: list[str] = []
+    fence = FenceTracker()
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+        no_nl = line.rstrip("\r\n")
+
+        if fence.active:
+            out.append(line)
+            fence.update(no_nl)
+            i += 1
+            continue
+
+        if FENCE_RE.match(no_nl):
+            out.append(line)
+            fence.update(no_nl)
+            i += 1
+            continue
+
+        if no_nl.endswith("\\"):
+            base = no_nl[:-1].rstrip(" \t")
+            if i + 1 < n:
+                next_line = lines[i + 1]
+                next_no_nl = next_line.rstrip("\r\n")
+                if (
+                    next_no_nl.strip() != ""
+                    and re.match(r"^[ \t]+", next_no_nl)
+                    and not FENCE_RE.match(next_no_nl)
+                ):
+                    joined = base + " " + next_no_nl.lstrip(" \t")
+                    out.append(joined + _line_ending(next_line))
+                    i += 2
+                    continue
+
+            out.append(base + _line_ending(line))
+            i += 1
+            continue
+
         out.append(line)
         fence.update(no_nl)
         i += 1
@@ -182,13 +297,54 @@ def collapse_blank_lines_outside_fences(lines: list[str]) -> list[str]:
     return out
 
 
+def ensure_blank_lines_around_headings(lines: list[str]) -> list[str]:
+    """Ensure headings are surrounded by blank lines outside code fences"""
+    out: list[str] = []
+    fence = FenceTracker()
+    n = len(lines)
+
+    for idx, line in enumerate(lines):
+        no_nl = line.rstrip("\r\n")
+
+        if fence.active:
+            out.append(line)
+            fence.update(no_nl)
+            continue
+
+        if FENCE_RE.match(no_nl):
+            out.append(line)
+            fence.update(no_nl)
+            continue
+
+        if HEADING_RE.match(no_nl):
+            if out and out[-1].strip() != "":
+                out.append(_line_ending(line))
+
+            out.append(line)
+
+            if idx + 1 < n and lines[idx + 1].strip() != "":
+                out.append(_line_ending(line))
+
+            fence.update(no_nl)
+            continue
+
+        out.append(line)
+        fence.update(no_nl)
+
+    return out
+
+
 def clean_markdown(text: str) -> str:
     """Apply the full cleaning pipeline to raw Markdown text"""
     lines = text.splitlines(keepends=True)
     lines = remove_unsupported_chatgpt_stubs(lines)
+    lines = normalize_role_headings(lines)
     lines = strip_citations_outside_fences(lines)
+    lines = unescape_tildes_outside_fences(lines)
+    lines = normalize_backslash_linebreaks(lines)
     lines = trim_trailing_whitespace(lines)
     lines = collapse_blank_lines_outside_fences(lines)
+    lines = ensure_blank_lines_around_headings(lines)
     return "".join(lines)
 
 
