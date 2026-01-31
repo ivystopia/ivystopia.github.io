@@ -1,30 +1,35 @@
 #!/usr/bin/env python3
-
 """
-This script adds tracks to a specified Spotify playlist.
+Add tracks to a specified Spotify playlist.
 
 Environment Variables:
 - SPOTIFY_CLIENT_ID: Your Spotify client ID.
 - SPOTIFY_CLIENT_SECRET: Your Spotify client secret.
+- SPOTIFY_REDIRECT_URI: Optional override for redirect URI.
+  Default: http://127.0.0.1:9090/callback
 
 Usage:
-1. Set the required environment variables:
-    export SPOTIFY_CLIENT_ID=your_client_id
-    export SPOTIFY_CLIENT_SECRET=your_client_secret
-2. Run the script with the playlist ID or URL as an argument:
-    ./add_spotify_tracks --playlist <playlist_id_or_url>
-3. Enter track URLs or URIs, one per line. Press Enter on an empty line to finish.
+  add_spotify_tracks --playlist <playlist_id_or_url>
+  Then provide track URLs/URIs/IDs on stdin, one per line. End with an empty line.
 
-Example:
-    ./add_spotify_tracks --playlist https://open.spotify.com/playlist/6pfn3u4v8dFwAKGCpZc0lF
+Examples:
+  add_spotify_tracks --playlist https://open.spotify.com/playlist/08vhX5hB5JPA7nOuEp4MuE
+  (paste URLs, then blank line)
+
+  cat urls.txt | add_spotify_tracks --playlist 08vhX5hB5JPA7nOuEp4MuE
 """
 
 import sys
 import os
 import argparse
 from urllib.parse import urlparse
+
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+
+
+DEFAULT_REDIRECT_URI = "http://127.0.0.1:9090/callback"
+SCOPE = "playlist-modify-public playlist-modify-private"
 
 
 def parse_arguments():
@@ -33,38 +38,52 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def read_track_urls():
+def read_track_urls(stdin) -> list[str]:
     print(
-        "Please enter the track URLs (one per line), followed by an empty line to end input:"
+        "Please enter the track URLs/URIs (one per line), followed by an empty line to end input:"
     )
-    tracks = []
-    for line in sys.stdin:
-        if line.strip() == "":
+    tracks: list[str] = []
+    for line in stdin:
+        s = line.strip()
+        if s == "":
             break
-        tracks.append(line.strip())
+        tracks.append(s)
     return tracks
 
 
-def extract_id(url_or_uri):
+def extract_id(url_or_uri: str) -> str:
+    url_or_uri = url_or_uri.strip()
+
     if url_or_uri.startswith("http"):
-        parsed_url = urlparse(url_or_uri)
-        item_id = parsed_url.path.split("/")[-1]
-        # Remove any query parameters
-        item_id = item_id.split("?")[0]
-        return item_id
-    elif url_or_uri.startswith("spotify:"):
+        parsed = urlparse(url_or_uri)
+        item_id = parsed.path.split("/")[-1]
+        return item_id.split("?")[0]
+
+    if url_or_uri.startswith("spotify:"):
         return url_or_uri.split(":")[-1]
-    else:
-        return url_or_uri
+
+    return url_or_uri
 
 
-def get_playlist_track_ids(sp, playlist_id):
+def get_playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> set[str]:
     results = sp.playlist_tracks(playlist_id)
-    tracks = results["items"]
-    while results["next"]:
+    items = results.get("items", [])
+
+    while results.get("next"):
         results = sp.next(results)
-        tracks.extend(results["items"])
-    return [item["track"]["id"] for item in tracks]
+        items.extend(results.get("items", []))
+
+    track_ids: set[str] = set()
+    for item in items:
+        track = item.get("track")
+        if track and track.get("id"):
+            track_ids.add(track["id"])
+    return track_ids
+
+
+def chunked(seq: list[str], n: int):
+    for i in range(0, len(seq), n):
+        yield seq[i : i + n]
 
 
 def main():
@@ -72,41 +91,58 @@ def main():
 
     client_id = os.getenv("SPOTIFY_CLIENT_ID")
     client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", DEFAULT_REDIRECT_URI)
 
     if not client_id or not client_secret:
-        print(
-            "Error: Spotify credentials (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET) are required."
-        )
+        print("Error: SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are required.")
         sys.exit(1)
 
-    track_urls = read_track_urls()
     playlist_id = extract_id(args.playlist)
-    track_ids = [extract_id(url) for url in track_urls]
 
-    sp = spotipy.Spotify(
-        auth_manager=SpotifyOAuth(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri="http://localhost/",
-            scope="playlist-modify-public playlist-modify-private",
-        )
+    # Authenticate BEFORE consuming stdin so piping works.
+    auth_manager = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope=SCOPE,
     )
+    sp = spotipy.Spotify(auth_manager=auth_manager)
+
+    # Now read track URLs from stdin
+    track_urls = read_track_urls(sys.stdin)
+    if not track_urls:
+        print("No tracks provided.")
+        return
+
+    track_ids = [extract_id(u) for u in track_urls]
 
     existing_track_ids = get_playlist_track_ids(sp, playlist_id)
-    new_track_ids = [
-        track_id for track_id in track_ids if track_id not in existing_track_ids
-    ]
 
-    for track_id in track_ids:
-        if track_id in existing_track_ids:
-            print(f"SKIPPED : {track_id}")
+    # Deduplicate while preserving order
+    seen = set()
+    deduped_track_ids = []
+    for tid in track_ids:
+        if tid not in seen:
+            seen.add(tid)
+            deduped_track_ids.append(tid)
+
+    new_track_ids = [tid for tid in deduped_track_ids if tid not in existing_track_ids]
+
+    for tid in deduped_track_ids:
+        if tid in existing_track_ids:
+            print(f"SKIPPED : {tid}")
         else:
-            print(f"ADDED   : {track_id}")
+            print(f"ADDED   : {tid}")
 
-    if new_track_ids:
-        sp.playlist_add_items(playlist_id=playlist_id, items=new_track_ids)
-    else:
+    if not new_track_ids:
         print("No new tracks to add.")
+        return
+
+    # Spotify API limit: 100 items per request
+    for batch in chunked(new_track_ids, 100):
+        sp.playlist_add_items(playlist_id=playlist_id, items=batch)
+
+    print(f"Done. Added {len(new_track_ids)} new tracks.")
 
 
 if __name__ == "__main__":
