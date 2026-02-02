@@ -30,18 +30,46 @@ if ! docker inspect -f '{{.State.Running}}' "$container" >/dev/null 2>&1; then
   fail "container ${container} is not running"
 fi
 
-# RFC3339 UTC timestamp (POSIX date format directives).
-ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+# Use epoch seconds so Docker logs filtering is timezone-agnostic.
+ts=$(date +%s)
 
 # Send the cookie-prefixed command over p2pool's local console TCP socket.
 # The console port and cookie are published in /home/p2pool/local/console.
-docker exec "$container" bash -lc '
-  set -e
-  console=$(cat /home/p2pool/local/console)
-  port=$(printf "%s" "$console" | sed -n "s/.*\\\"tcp_port\\\":\\([0-9]*\\).*/\\1/p")
-  cookie=$(printf "%s" "$console" | sed -n "s/.*\\\"cookie\\\":\\\"\\([^\\\"]*\\)\\\".*/\\1/p")
-  exec 3<>/dev/tcp/127.0.0.1/$port
-  printf "%sstatus\\n" "$cookie" >&3
+console=""
+tries=10
+delay=1
+while [ "$tries" -gt 0 ]; do
+  console=$(docker exec "$container" cat /home/p2pool/local/console 2>/dev/null || true)
+  if [ -n "$console" ]; then
+    break
+  fi
+  tries=$((tries - 1))
+  sleep "$delay"
+done
+if [ -z "$console" ]; then
+  fail "missing /home/p2pool/local/console in container ${container}"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  parsed=$(printf '%s' "$console" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("tcp_port","")); print(data.get("cookie",""))')
+  port=$(printf '%s\n' "$parsed" | sed -n '1p')
+  cookie=$(printf '%s\n' "$parsed" | sed -n '2p')
+elif command -v perl >/dev/null 2>&1; then
+  port=$(printf '%s' "$console" | perl -ne 'if(/"tcp_port":([0-9]+)/){print $1; exit}')
+  cookie=$(printf '%s' "$console" | perl -ne 'if(/"cookie":"((?:\\.|[^"\\])*)"/){$c=$1; $c =~ s/\\(.)/$1/g; print $c; exit}')
+else
+  port=$(printf '%s' "$console" | sed -n 's/.*"tcp_port":\([0-9]*\).*/\1/p')
+  cookie_raw=$(printf '%s' "$console" | sed -n 's/.*"cookie":"\([^"]*\)".*/\1/p')
+  cookie=$(printf '%s' "$cookie_raw" | sed 's/\\\\/\\/g; s/\\"/"/g')
+fi
+
+if [ -z "$port" ] || [ -z "$cookie" ]; then
+  fail "could not parse console cookie/port"
+fi
+
+docker exec -e PORT="$port" -e COOKIE="$cookie" "$container" bash -lc '
+  exec 3<>/dev/tcp/127.0.0.1/$PORT
+  printf "%sstatus\n" "$COOKIE" >&3
 '
 
 # Give p2pool a moment to emit the status block.
