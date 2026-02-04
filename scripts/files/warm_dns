@@ -5,7 +5,12 @@
 
 # --- Configuration ---
 DIG_COMMAND="dig +timeout=5 +tries=2"
-WINDOWS_DRIVE="/mnt/c"
+WINDOWS_MOUNT_ROOT="/mnt"
+LINUX_PROFILE_ROOTS=(
+    "$HOME/.mozilla/firefox"
+    "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox" # Flatpak
+    "$HOME/snap/firefox/common/.mozilla/firefox"          # Snap
+)
 
 # --- Verify required commands are available ---
 REQUIRED_CMDS=(sqlite3 awk dig sort grep cp mktemp cut parallel)
@@ -51,37 +56,71 @@ trap 'echo; echo "Ctrl-C pressed. Exiting."; cleanup; exit 1' SIGINT
 # --- If no domain list provided, extract from Firefox profiles ---
 if [ "$CUSTOM_DOMAINS_PROVIDED" -eq 0 ]; then
     DB_FOUND=0
-    for userdir in "$WINDOWS_DRIVE"/Users/*; do
-        if [ ! -d "$userdir" ]; then
+    shopt -s nullglob
+
+    process_db() {
+        local db="$1"
+        local label="$2"
+        local tmp_db
+
+        if [ ! -f "$db" ]; then
+            return
+        fi
+        DB_FOUND=1
+        echo "$label" >>"$PROFILES_FILE"
+        tmp_db=$(mktemp)
+        if ! cp "$db" "$tmp_db"; then
+            echo "Error: Failed to copy database: $db"
+            rm -f "$tmp_db"
+            return
+        fi
+        sqlite3 "$tmp_db" "SELECT url FROM moz_places;" |
+            awk -F/ '{ if ($3 != "") print $3 }' |
+            grep -E '^[A-Za-z0-9.-]+' |
+            sort -u >>"$DOMAIN_FILE"
+        rm -f "$tmp_db"
+    }
+
+    # Linux profile locations (native installs, Flatpak, Snap)
+    for root in "${LINUX_PROFILE_ROOTS[@]}"; do
+        if [ ! -d "$root" ]; then
             continue
         fi
-        PROFILES_DIR="$userdir/AppData/Roaming/Mozilla/Firefox/Profiles"
-        if [ ! -d "$PROFILES_DIR" ]; then
-            continue
-        fi
-        for profile in "$PROFILES_DIR"/*; do
+        for profile in "$root"/*; do
             if [ ! -d "$profile" ]; then
                 continue
             fi
-            DB="$profile/places.sqlite"
-            if [ -f "$DB" ]; then
-                DB_FOUND=1
-                username=$(basename "$userdir")
-                profile_name=$(basename "$profile")
-                echo "$username : $profile_name" >>"$PROFILES_FILE"
-                TMP_DB=$(mktemp)
-                if ! cp "$DB" "$TMP_DB"; then
-                    echo "Error: Failed to copy database: $DB"
-                    continue
-                fi
-                sqlite3 "$TMP_DB" "SELECT url FROM moz_places;" |
-                    awk -F/ '{ if ($3 != "") print $3 }' |
-                    grep -E '^[A-Za-z0-9.-]+' |
-                    sort -u >>"$DOMAIN_FILE"
-                rm -f "$TMP_DB"
-            fi
+            process_db "$profile/places.sqlite" "linux : $profile"
         done
     done
+
+    # Windows profile locations (WSL with mounted drives)
+    if [ -d "$WINDOWS_MOUNT_ROOT" ]; then
+        for drive in "$WINDOWS_MOUNT_ROOT"/*; do
+            if [ ! -d "$drive/Users" ]; then
+                continue
+            fi
+            for userdir in "$drive"/Users/*; do
+                if [ ! -d "$userdir" ]; then
+                    continue
+                fi
+                PROFILES_DIR="$userdir/AppData/Roaming/Mozilla/Firefox/Profiles"
+                if [ ! -d "$PROFILES_DIR" ]; then
+                    continue
+                fi
+                for profile in "$PROFILES_DIR"/*; do
+                    if [ ! -d "$profile" ]; then
+                        continue
+                    fi
+                    username=$(basename "$userdir")
+                    profile_name=$(basename "$profile")
+                    process_db "$profile/places.sqlite" "windows : $username/$profile_name"
+                done
+            done
+        done
+    fi
+
+    shopt -u nullglob
     if [ "$DB_FOUND" -eq 0 ]; then
         echo "No Firefox profiles found. Exiting."
         exit 1
