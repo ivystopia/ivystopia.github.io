@@ -17,6 +17,7 @@ trap 'error_exit "on line $LINENO"' ERR
 typeset -r GREEN="\033[1;32m"
 typeset -r RED="\033[1;31m"
 typeset -r BLUE="\033[1;34m"
+typeset -r YELLOW="\033[1;33m"
 typeset -r RESET="\033[0m"
 
 ## ── Logging ───────────────────────────────────────────────────────────────
@@ -114,12 +115,24 @@ upgrade_apt_packages() {
     run_cmd sudo apt-get clean
 }
 
-# Refresh tldr and mlocate databases
-update_databases() {
-    print_in_color "$GREEN" "Updating command databases..."
-    run_cmd tldr --update
+# Update 'locate' database
+update_locate() {
+    print_in_color "$GREEN" "Updating 'locate' database..."
     run_cmd sudo updatedb
-    print_in_color "$GREEN" "Databases updated successfully."
+    print_in_color "$GREEN" "Database updated successfully."
+    print_separator
+}
+
+# Update local TLDR (tealdeer) cache
+update_tldr_pages() {
+    print_in_color "$GREEN" "Updating tealdeer..."
+    print_in_color "$BLUE" "Running: tldr --update"
+    if ! tldr --update; then
+        print_in_color "$YELLOW" "Warning: failed to update tealdeer. Continuing."
+        print_separator
+        return 0
+    fi
+    print_in_color "$GREEN" "tealdeer manpages updated."
     print_separator
 }
 
@@ -163,9 +176,10 @@ clean_old_logs() {
 run_steps=(
     upgrade_pihole
     upgrade_apt_packages
-    update_databases
     remove_orphaned_packages
     clean_journal_logs
+    update_tldr_pages
+    update_locate
     upgrade_oh_my_zsh
 )
 
